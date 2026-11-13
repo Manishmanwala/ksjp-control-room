@@ -1,27 +1,75 @@
+// 04-execution/actions.js
+import { getAllMembers, getCurrentUser, openJoinOrProfileModal } from "../05-rules/auth-lock.js";
+
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 
+const POSTS_STORAGE_KEY = "KSJP_ROOM_POSTS_V1";
+
+function getRoomPosts(roomId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(POSTS_STORAGE_KEY)) || {};
+    return all[roomId] || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveRoomPost(roomId, postObj) {
+  try {
+    const all = JSON.parse(localStorage.getItem(POSTS_STORAGE_KEY)) || {};
+    if (!all[roomId]) all[roomId] = [];
+    all[roomId].push(postObj);
+    localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(all));
+  } catch (e) {}
+}
+
+// जुड़े हुए एडमिन के नाम और फ़ोटो को मुख्य कार्डों पर अपडेट करना
+export function syncPanelCardsWithMembers() {
+  const members = getAllMembers();
+  const cards = document.querySelectorAll(".panel-card");
+
+  cards.forEach((card) => {
+    const action = card.getAttribute("data-action");
+    if (members[action]) {
+      const m = members[action];
+      const nameEl = card.querySelector(".card-name");
+      const subEl = card.querySelector(".card-sub");
+      const pillEl = card.querySelector(".status-pill");
+      const avatarEl = card.querySelector(".avatar-manager, .avatar-member");
+
+      if (nameEl) nameEl.textContent = m.name;
+      if (subEl) subEl.textContent = `मो. ${m.phone} • स्थायी सदस्य`;
+      if (pillEl) {
+        pillEl.textContent = "जुड़ा हुआ 🔒";
+        pillEl.style.background = "#00c853";
+        pillEl.style.color = "#ffffff";
+      }
+      if (avatarEl && m.photo) {
+        avatarEl.innerHTML = `<img src="${m.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+      }
+    }
+  });
+}
+
 export function initPanelActions() {
+  syncPanelCardsWithMembers();
+
+  // अगर कोई पहली बार आया है, तो उसे जुड़ने का विकल्प दें
+  if (!getCurrentUser()) {
+    setTimeout(() => {
+      openJoinOrProfileModal(() => syncPanelCardsWithMembers());
+    }, 600);
+  }
+
   const cards = document.querySelectorAll(".panel-card");
   cards.forEach((card) => {
     card.style.cursor = "pointer";
-    card.addEventListener("click", async () => {
+    card.addEventListener("click", () => {
       const title = card.querySelector(".card-name")?.textContent || "कक्ष";
-      const sub = card.querySelector(".card-sub")?.textContent || "";
-      const seatStatus = card.querySelector(".status-pill")?.textContent?.trim() || "";
-      const actionType = card.getAttribute("data-action");
-
-      let ruleNote = "नियम सामान्य है।";
-      try {
-        const rulesMod = await import("../05-rules/rules.js");
-        if (rulesMod && rulesMod.checkAccessRule) {
-          const check = rulesMod.checkAccessRule(actionType, seatStatus);
-          ruleNote = check.ruleNote;
-        }
-      } catch (e) {}
-
-      openActionModal(title, sub, actionType, ruleNote);
+      const roomId = card.getAttribute("data-action") || "general";
+      openRoomPostScreen(roomId, title);
     });
   });
 
@@ -31,65 +79,96 @@ export function initPanelActions() {
   if (notifyBtn) {
     notifyBtn.style.cursor = "pointer";
     notifyBtn.addEventListener("click", () => {
-      openActionModal("🔔 पार्टी सूचना केंद्र", "आपातकालीन व आधिकारिक संदेश", "notify", "नियम: केवल आधिकारिक घोषणाएँ यहाँ दिखेंगी।");
+      openRoomPostScreen("official-notices", "🔔 पार्टी सूचना केंद्र");
     });
   }
 
   if (profileBtn) {
     profileBtn.style.cursor = "pointer";
     profileBtn.addEventListener("click", () => {
-      openActionModal("👤 प्रोफ़ाइल (P)", "KSJP नियंत्रण कक्ष संचालक", "profile", "नियम: एक समय में एक ही मुख्य संचालक सक्रिय रहेगा।");
+      openJoinOrProfileModal(() => syncPanelCardsWithMembers());
     });
   }
 }
 
-function openActionModal(title, subtitle, actionType, ruleNote) {
-  let oldModal = document.getElementById("ksjp-action-modal");
-  if (oldModal) oldModal.remove();
+// हर कक्ष के अंदर मैसेज पोस्ट करने और पढ़ने की स्क्रीन
+function openRoomPostScreen(roomId, roomTitle) {
+  let old = document.getElementById("ksjp-room-screen");
+  if (old) old.remove();
 
-  let bodyMessage = "यह कक्ष सक्रिय है। यहाँ से आगे का संचालन किया जाएगा।";
-  if (actionType === "site-manager") {
-    bodyMessage = "🔐 मुख्य नियंत्रक कक्ष: यहाँ से नए एडमिन जोड़े और हटाए जाएंगे।";
-  } else if (actionType === "board-room") {
-    bodyMessage = "💬 सामूहिक चर्चा कक्ष: सभी सक्रिय एडमिन यहाँ बैठक और संवाद कर सकेंगे।";
-  } else if (actionType && actionType.startsWith("admin-")) {
-    bodyMessage = "➕ यह पद अभी खाली है। Site Manager द्वारा नियुक्ति के बाद यह कक्ष खुलेगा।";
-  }
-
-  const modal = document.createElement("div");
-  modal.id = "ksjp-action-modal";
-  modal.style.cssText = `
-    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65);
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px; z-index: 9999;
+  const user = getCurrentUser();
+  const screen = document.createElement("div");
+  screen.id = "ksjp-room-screen";
+  screen.style.cssText = `
+    position: fixed; inset: 0; width: 100vw; height: 100dvh;
+    background: #f1f5f9; display: flex; flex-direction: column; z-index: 9999;
   `;
 
-  modal.innerHTML = `
-    <div style="
-      width: 100%; max-width: 360px; background: #ffffff; border-radius: 18px;
-      border: 2px solid #0057ff; padding: 20px; text-align: center;
-      box-shadow: 0 15px 35px rgba(0,0,0,0.35); color: #0f172a;
-    ">
-      <h3 style="font-size: 18px; font-weight: 800; color: #0057ff; margin-bottom: 4px;">${title}</h3>
-      <p style="font-size: 12.5px; color: #475569; margin-bottom: 12px; font-weight: 600;">${subtitle}</p>
-      <div style="
-        background: #f1f5f9; border-left: 4px solid #0057ff; padding: 10px 12px;
-        border-radius: 10px; font-size: 13.5px; line-height: 1.45; margin-bottom: 10px;
-      ">${bodyMessage}</div>
-      <div style="
-        background: #fef9c3; border: 1px solid #eab308; color: #854d0e;
-        padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; margin-bottom: 16px;
-      ">⚖️ ${ruleNote}</div>
-      <button id="close-ksjp-modal" style="
-        width: 100%; padding: 10px; background: #0057ff; color: #ffffff;
-        border: none; border-radius: 999px; font-size: 14px; font-weight: 700; cursor: pointer;
-      ">ठीक है</button>
-    </div>
+  const renderPostsList = () => {
+    const posts = getRoomPosts(roomId);
+    const listBox = document.getElementById("ksjp-posts-list");
+    if (!listBox) return;
+
+    if (posts.length === 0) {
+      listBox.innerHTML = `<div style="text-align:center;color:#64748b;margin-top:40px;font-size:13.5px;">अभी इस कक्ष में कोई पोस्ट नहीं है।<br/>नीचे से पहला संदेश पोस्ट करें!</div>`;
+      return;
+    }
+
+    listBox.innerHTML = posts.map((p) => `
+      <div style="background:#ffffff;border-radius:14px;padding:10px 12px;margin-bottom:10px;border:1px solid #cbd5e1;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <img src="${p.authorPhoto || ""}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;background:#0057ff;" />
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:800;color:#0057ff;">${p.authorName} <span style="font-size:10.5px;color:#475569;font-weight:600;">(${p.authorSeat})</span></div>
+            <div style="font-size:10px;color:#64748b;">${p.time}</div>
+          </div>
+        </div>
+        <div style="font-size:14px;color:#0f172a;line-height:1.45;white-space:pre-wrap;">${p.text}</div>
+      </div>
+    `).join("");
+    listBox.scrollTop = listBox.scrollHeight;
+  };
+
+  screen.innerHTML = `
+    <header style="height:56px;background:#0057ff;color:#fff;padding:0 14px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="close-room-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;cursor:pointer;">← वापस</button>
+        <div style="font-size:16px;font-weight:800;">${roomTitle}</div>
+      </div>
+    </header>
+
+    <main id="ksjp-posts-list" style="flex:1;overflow-y:auto;padding:12px;"></main>
+
+    <footer style="padding:8px 10px;background:#ffffff;border-top:1px solid #cbd5e1;display:flex;gap:8px;align-items:center;flex-shrink:0;">
+      <input id="ksjp-post-input" type="text" placeholder="${user ? "यहाँ संदेश लिखें..." : "संदेश लिखने के लिए पहले P से जुड़ें"}" style="flex:1;padding:10px 12px;border:1.5px solid #cbd5e1;border-radius:999px;font-size:14px;outline:none;" />
+      <button id="ksjp-send-post" style="padding:10px 16px;background:#0057ff;color:#fff;border:none;border-radius:999px;font-weight:800;cursor:pointer;">पोस्ट</button>
+    </footer>
   `;
 
-  document.body.appendChild(modal);
-  document.getElementById("close-ksjp-modal").addEventListener("click", () => modal.remove());
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.remove();
-  });
+  document.body.appendChild(screen);
+  renderPostsList();
+
+  document.getElementById("close-room-btn").onclick = () => screen.remove();
+
+  document.getElementById("ksjp-send-post").onclick = () => {
+    const activeUser = getCurrentUser();
+    if (!activeUser) {
+      openJoinOrProfileModal(() => syncPanelCardsWithMembers());
+      return;
+    }
+    const input = document.getElementById("ksjp-post-input");
+    const text = input.value.trim();
+    if (!text) return;
+
+    saveRoomPost(roomId, {
+      authorName: activeUser.name,
+      authorSeat: activeUser.seatId.toUpperCase(),
+      authorPhoto: activeUser.photo,
+      text,
+      time: new Date().toLocaleString("hi-IN")
+    });
+
+    input.value = "";
+    renderPostsList();
+  };
 }

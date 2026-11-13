@@ -1,0 +1,109 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: radial-gradient(circle at top, #1e293b 0%, #0f172a 75%);
+  color: #f8fafc;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.boot-screen {
+  width: 100%;
+  max-width: 420px;
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+.boot-screen.fade-out {
+  opacity: 0;
+  transform: scale(1.05);
+  pointer-events: none;
+}
+
+.card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  padding: 30px 24px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(249, 115, 22, 0.12);
+  animation: cardEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cardEnter {
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.badge {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 5px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+h1 {
+  color: #f97316;
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+p {
+  color: #94a3b8;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.status-box {
+  background: #0f172a;
+  border: 1px solid #1e40af;
+  color: #93c5fd;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.status-ok {
+  border-color: #059669;
+  color: #6ee7b7;
+  background: rgba(6, 78, 59, 0.38);
+}
+
+.status-err {
+  border-color: #dc2626;
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.38);
+}
+
+.progress-track {
+  height: 4px;
+  background: #0f172a;
+  border-radius: 999px;
+  margin-top: 16px;
+  overflow: hidden;
+  display: none;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #f97316, #10b981);
+  transition: width 3s linear;
+}

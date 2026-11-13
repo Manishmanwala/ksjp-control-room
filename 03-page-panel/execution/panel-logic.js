@@ -4,44 +4,44 @@ export async function showAdminPanel() {
 
   if (bootEl) bootEl.style.display = "none";
 
-  // ग्राफ़िक्स, रंग-रूप और डिज़ाइन (CSS) सीधे इसी चेकपॉइंट फ़ोल्डर में लॉक
+  // ग्राफ़िक्स, रंग-रूप और डिज़ाइन (CSS) सीधे इसी एकलौती फ़ाइल में लॉक
   if (!document.getElementById("ksjp-panel-styles")) {
     const style = document.createElement("style");
     style.id = "ksjp-panel-styles";
     style.textContent = `
       * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-      body { background: #e2e8f0 !important; color: #0f172a !important; height: 100dvh; display: flex; justify-content: center; overflow: hidden; }
+      html, body { background: #0057ff !important; color: #0f172a !important; height: 100%; width: 100%; overflow: hidden; }
       .panel-screen {
-        width: 100%; max-width: 480px; height: 100dvh; background-color: #ffffff;
+        width: 100%; max-width: 480px; height: 100%; margin: 0 auto; background-color: #ffffff;
         background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-opacity='0.24'%3E%3Ccircle cx='22' cy='24' r='8'/%3E%3Cpath d='M75 18l10 16H65z'/%3E%3Crect x='20' y='74' width='16' height='12' rx='3'/%3E%3Cpath d='M82 76a9 9 0 1 0 9 9'/%3E%3Cpath d='M52 46l5 5 10-10'/%3E%3Ccircle cx='98' cy='52' r='4'/%3E%3Cpath d='M14 52h12M20 46v12'/%3E%3C/g%3E%3C/svg%3E");
-        display: flex; flex-direction: column; border-left: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;
+        display: flex; flex-direction: column; overflow: hidden;
       }
-      .top-header { height: 64px; padding: 0 14px; background: #0057ff; color: #ffffff; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; box-shadow: 0 2px 10px rgba(0, 87, 255, 0.25); }
+      .top-header { height: 58px; padding: 0 14px; background: #0057ff; color: #ffffff; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; box-shadow: 0 2px 10px rgba(0, 87, 255, 0.25); }
       .brand-box { display: flex; align-items: center; gap: 10px; }
-      .brand-logo { width: 46px; height: 46px; border-radius: 50%; background: #ffffff; border: 2.5px solid #ffd600; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; }
+      .brand-logo { width: 42px; height: 42px; border-radius: 50%; background: #ffffff; border: 2.5px solid #ffd600; overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
       .brand-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .brand-title { font-size: 18px; font-weight: 800; color: #ffffff; }
+      .brand-title { font-size: 17px; font-weight: 800; color: #ffffff; }
       .header-actions { display: flex; align-items: center; gap: 10px; }
-      .icon-btn { width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; user-select: none; }
-      .icon-btn.profile-p { background: #ffd600; color: #0057ff; border: 2px solid #ffffff; font-size: 15px; }
-      .cards-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-      .panel-card { flex: 1; min-height: 0; padding: 0 16px; display: flex; align-items: center; gap: 14px; user-select: none; }
+      .icon-btn { width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; user-select: none; }
+      .icon-btn.profile-p { background: #ffd600; color: #0057ff; border: 2px solid #ffffff; font-size: 14px; }
+      .cards-container { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+      .panel-card { flex: 1; min-height: 0; padding: 0 14px; display: flex; align-items: center; gap: 12px; user-select: none; }
       .card-manager { background: rgba(255, 214, 0, 0.16); }
-      .avatar-manager { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #ff1e1e, #991b1b); color: #ffd600; border: 3px solid #ffd600; box-shadow: 0 0 0 3px #ff1e1e; font-weight: 900; font-size: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .avatar-manager { width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #ff1e1e, #991b1b); color: #ffd600; border: 2.5px solid #ffd600; box-shadow: 0 0 0 2.5px #ff1e1e; font-weight: 900; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .card-board { background: rgba(0, 200, 83, 0.11); }
-      .avatar-board { width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg, #00c853, #007e33); color: #ffffff; border: 3px solid #0057ff; font-weight: 900; font-size: 19px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .avatar-member { width: 38px; height: 38px; border-radius: 50%; background: #0066ff; color: #ffffff; border: 2px solid #93c5fd; font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 7px; }
+      .avatar-board { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #00c853, #007e33); color: #ffffff; border: 2.5px solid #0057ff; font-weight: 900; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .avatar-member { width: 36px; height: 36px; border-radius: 50%; background: #0066ff; color: #ffffff; border: 2px solid #93c5fd; font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 5px; }
       .card-info { flex: 1; height: 100%; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
       .panel-card:last-child .card-info { border-bottom: none; }
-      .card-text { display: flex; flex-direction: column; gap: 2px; }
-      .card-name { font-size: 15.5px; font-weight: 700; color: #0f172a; }
-      .card-sub { font-size: 12.5px; color: #475569; font-weight: 500; }
-      .status-pill { font-size: 11.5px; padding: 4px 11px; border-radius: 999px; font-weight: 700; }
+      .card-text { display: flex; flex-direction: column; gap: 1px; }
+      .card-name { font-size: 15px; font-weight: 700; color: #0f172a; }
+      .card-sub { font-size: 12px; color: #475569; font-weight: 500; }
+      .status-pill { font-size: 11px; padding: 3px 10px; border-radius: 999px; font-weight: 700; }
       .pill-red { background: #ff1e1e; color: #ffffff; }
       .pill-green { background: #00c853; color: #ffffff; }
       .pill-yellow { background: #ffd600; color: #0f172a; border: 1px solid #eab308; }
-      .bottom-bar { min-height: 48px; padding: 6px 12px; background: #ffffff; border-top: 1px solid #cbd5e1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .moral-capsule { width: 100%; padding: 6px 12px; background: #ffd600; color: #0f172a; border: 1.5px solid #ff1e1e; border-radius: 999px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11.5px; line-height: 1.25; font-weight: 800; }
+      .bottom-bar { padding: 8px 12px 12px 12px; background: #ffffff; border-top: 1px solid #cbd5e1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .moral-capsule { width: 100%; padding: 7px 12px; background: #ffd600; color: #0f172a; border: 1.5px solid #ff1e1e; border-radius: 16px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; line-height: 1.3; font-weight: 800; }
     `;
     document.head.appendChild(style);
   }
@@ -104,6 +104,7 @@ export async function showAdminPanel() {
     </footer>
   `;
 
+  // रिपॉज़िटरी से अपलोड की गई Screenshot फ़ोटो को अपने आप गोल लोगो में लगाना
   const logoImg = document.getElementById("ksjp-logo-img");
   try {
     const res = await fetch("https://api.github.com/repos/Manishmanwala/ksjp-control-room/contents/");
@@ -119,6 +120,7 @@ export async function showAdminPanel() {
     }
   } catch (e) {}
 
+  // चौथे फ़ोल्डर (04-execution/actions.js) को सक्रिय करना
   try {
     const execModule = await import("../../04-execution/actions.js");
     if (execModule && execModule.initPanelActions) {

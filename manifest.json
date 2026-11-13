@@ -1,0 +1,16 @@
+{
+  "name": "KSJP एडमिन पैनल",
+  "short_name": "KSJP पैनल",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0057ff",
+  "theme_color": "#0057ff",
+  "icons": [
+    {
+      "src": "./Screenshot_2026-11-13-13-58-17-58_7352322957d4404136654ef4adb64504.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -4,87 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
-  <title>KSJP कंट्रोल रूम</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-    body {
-      background: #0f172a;
-      color: #f8fafc;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .card {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 28px 24px;
-      max-width: 420px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
-    }
-    .badge {
-      display: inline-block;
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 14px;
-    }
-    h1 { color: #f97316; font-size: 22px; margin-bottom: 6px; }
-    p { color: #94a3b8; font-size: 14px; margin-bottom: 20px; }
-    .status-box {
-      background: #0f172a;
-      border: 1px solid #1e40af;
-      color: #93c5fd;
-      padding: 14px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 500;
-    }
-    .status-ok {
-      border-color: #059669;
-      color: #6ee7b7;
-      background: rgba(6, 78, 59, 0.35);
-    }
-    .status-err {
-      border-color: #dc2626;
-      color: #fca5a5;
-      background: rgba(127, 29, 29, 0.35);
-    }
-  </style>
+  <title>KSJP</title>
+  <link rel="stylesheet" href="./02-start-page/layout.css" />
 </head>
 <body>
-  <div class="card">
-    <div class="badge">🔒 गुप्त एडमिन सर्वर</div>
-    <h1>केवट समाज जनशक्ति पार्टी</h1>
-    <p>निजी नियंत्रण कक्ष (कंट्रोल रूम)</p>
-    <div id="status" class="status-box">⏳ अलग कमरे से चाबी उठाकर जुड़ रहा है...</div>
-  </div>
+  <section class="boot-screen" id="boot-screen">
+    <div class="card">
+      <div class="badge" id="boot-badge"></div>
+      <h1 id="boot-title"></h1>
+      <p id="boot-sub"></p>
+      <div id="status" class="status-box"></div>
+      <div class="progress-track" id="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+  </section>
 
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { firebaseConfig } from "./01-config/firebase-key.js";
-
-    const statusEl = document.getElementById("status");
-    try {
-      const app = initializeApp(firebaseConfig);
-      if (app && app.options && app.options.projectId) {
-        statusEl.className = "status-box status-ok";
-        statusEl.textContent = `✅ अलग चाबी रूम से Firebase (${app.options.projectId}) जुड़ गया है!`;
-      } else {
-        throw new Error("Project ID नहीं मिला");
-      }
-    } catch (err) {
-      statusEl.className = "status-box status-err";
-      statusEl.textContent = "❌ कनेक्शन त्रुटि: " + err.message;
-    }
+    import { runStartPage } from "./02-start-page/execution/start.js";
+    runStartPage();
   </script>
 </body>
 </html>

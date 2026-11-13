@@ -65,28 +65,19 @@
     <div class="badge">🔒 गुप्त एडमिन सर्वर</div>
     <h1>केवट समाज जनशक्ति पार्टी</h1>
     <p>निजी नियंत्रण कक्ष (कंट्रोल रूम)</p>
-    <div id="status" class="status-box">⏳ Firebase सर्वर से जुड़ रहा है...</div>
+    <div id="status" class="status-box">⏳ अलग कमरे से चाबी उठाकर जुड़ रहा है...</div>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyD-AzIA5g5X-ddUz1mKEDel3X83NMRZkco",
-      authDomain: "ksjp-party-portal.firebaseapp.com",
-      projectId: "ksjp-party-portal",
-      storageBucket: "ksjp-party-portal.firebasestorage.app",
-      messagingSenderId: "306712198819",
-      appId: "1:306712198819:web:b49ede0398be2a834fc916",
-      measurementId: "G-MD76KNGQ1D"
-    };
+    import { firebaseConfig } from "./01-config/firebase-key.js";
 
     const statusEl = document.getElementById("status");
     try {
       const app = initializeApp(firebaseConfig);
       if (app && app.options && app.options.projectId) {
         statusEl.className = "status-box status-ok";
-        statusEl.textContent = `✅ Firebase (${app.options.projectId}) सफलतापूर्वक जुड़ा हुआ है!`;
+        statusEl.textContent = `✅ अलग चाबी रूम से Firebase (${app.options.projectId}) जुड़ गया है!`;
       } else {
         throw new Error("Project ID नहीं मिला");
       }

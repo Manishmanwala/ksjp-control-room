@@ -4,11 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
-  <title>KSJP कंट्रोल रूम</title>
+  <meta name="theme-color" content="#0057ff" />
+  <title>KSJP एडमिन पैनल</title>
+
+  <!-- मोबाइल शॉर्टकट और ऐप आइकॉन के लिए -->
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" id="site-favicon" href="./21481_2.jpg" type="image/jpeg" />
+  <link rel="apple-touch-icon" id="apple-touch-icon" href="./21481_2.jpg" />
+
   <link rel="stylesheet" href="./02-start-page/layout.css" />
   <link rel="stylesheet" href="./03-page-panel/layout.css" />
   <style>
-    /* पहले पेज के दौरान गहरा नीला बैकग्राउंड सुरक्षित रखना */
     body {
       background: #0f172a !important;
     }
@@ -34,6 +40,24 @@
   <script type="module">
     import { runStartPage } from "./02-start-page/execution/start.js";
 
+    // अपलोड की गई Screenshot या लोगो फ़ोटो को ब्राउज़र और शॉर्टकट आइकॉन में लगाना
+    (async () => {
+      try {
+        const res = await fetch("https://api.github.com/repos/Manishmanwala/ksjp-control-room/contents/");
+        if (res.ok) {
+          const files = await res.json();
+          const foundLogo = files.find((f) =>
+            f.type === "file" &&
+            (f.name.startsWith("Screenshot_") || f.name === "21481_2.jpg" || /\.(jpg|jpeg|png|webp)$/i.test(f.name))
+          );
+          if (foundLogo && foundLogo.download_url) {
+            document.getElementById("site-favicon").href = foundLogo.download_url;
+            document.getElementById("apple-touch-icon").href = foundLogo.download_url;
+          }
+        }
+      } catch (e) {}
+    })();
+
     runStartPage(async () => {
       try {
         const mod = await import("./03-page-panel/execution/panel-logic.js");
@@ -41,9 +65,7 @@
           document.body.style.background = "#e2e8f0";
           mod.showAdminPanel();
         }
-      } catch (err) {
-        // जब तक panel-logic.js न बने, तब तक बिना एरर दिए शांत रहेगा
-      }
+      } catch (err) {}
     });
   </script>
 </body>

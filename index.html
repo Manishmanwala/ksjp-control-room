@@ -7,8 +7,15 @@
   <title>KSJP कंट्रोल रूम</title>
   <link rel="stylesheet" href="./02-start-page/layout.css" />
   <link rel="stylesheet" href="./03-page-panel/layout.css" />
+  <style>
+    /* पहले पेज के दौरान गहरा नीला बैकग्राउंड सुरक्षित रखना */
+    body {
+      background: #0f172a !important;
+    }
+  </style>
 </head>
 <body>
+  <!-- पहला पेज: 3 सेकंड बूट स्क्रीन -->
   <section class="boot-screen" id="boot-screen">
     <div class="card">
       <div class="badge" id="boot-badge"></div>
@@ -21,14 +28,22 @@
     </div>
   </section>
 
+  <!-- दूसरा पेज: मुख्य KSJP एडमिन पैनल -->
   <section class="panel-screen" id="panel-screen" style="display:none;"></section>
 
   <script type="module">
     import { runStartPage } from "./02-start-page/execution/start.js";
-    import { showAdminPanel } from "./03-page-panel/execution/panel-logic.js";
 
-    runStartPage(() => {
-      showAdminPanel();
+    runStartPage(async () => {
+      try {
+        const mod = await import("./03-page-panel/execution/panel-logic.js");
+        if (mod && mod.showAdminPanel) {
+          document.body.style.background = "#e2e8f0";
+          mod.showAdminPanel();
+        }
+      } catch (err) {
+        // जब तक panel-logic.js न बने, तब तक बिना एरर दिए शांत रहेगा
+      }
     });
   </script>
 </body>

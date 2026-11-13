@@ -2,10 +2,11 @@
 <html lang="hi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
-  <title>KSJP</title>
+  <title>KSJP कंट्रोल रूम</title>
   <link rel="stylesheet" href="./02-start-page/layout.css" />
+  <link rel="stylesheet" href="./03-page-panel/layout.css" />
 </head>
 <body>
   <section class="boot-screen" id="boot-screen">
@@ -20,9 +21,15 @@
     </div>
   </section>
 
+  <section class="panel-screen" id="panel-screen" style="display:none;"></section>
+
   <script type="module">
     import { runStartPage } from "./02-start-page/execution/start.js";
-    runStartPage();
+    import { showAdminPanel } from "./03-page-panel/execution/panel-logic.js";
+
+    runStartPage(() => {
+      showAdminPanel();
+    });
   </script>
 </body>
 </html>

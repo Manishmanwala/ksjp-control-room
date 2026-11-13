@@ -2,6 +2,7 @@
 // 1. 1-to-1 प्राइवेट लाइव ऑडियो कॉल (WebRTC + Firestore Signaling)
 // 2. बोर्ड रूम सामूहिक कॉल अलर्ट / रिंग
 // 3. कॉन्फ्रेंस रूम (भविष्य के अपडेट के लिए तैयार सादा लेआउट)
+// 4. सूचना केंद्र घंटी (🔔) पर नया संदेश आने पर लाल निशान (Red Badge)
 
 export async function initVoiceAndConferenceSystem() {
   let projectId = "";
@@ -25,7 +26,7 @@ export async function initVoiceAndConferenceSystem() {
     }
   };
 
-  // मोबाइल में हल्की रिंगटोन बजाने का इनबिल्ट जनरेटर (बिना बाहरी ऑडियो फ़ाइल के)
+  // मोबाइल में हल्की रिंगटोन बजाने का इनबिल्ट जनरेटर
   let ringInterval = null;
   const startRingtone = () => {
     if (ringInterval) return;
@@ -54,6 +55,55 @@ export async function initVoiceAndConferenceSystem() {
       clearInterval(ringInterval);
       ringInterval = null;
     }
+  };
+
+  // =========================================================================
+  // भाग 0: घंटी (🔔) पर नया संदेश आने पर लाल निशान दिखाना
+  // =========================================================================
+  let latestNoticeCount = 0;
+  const setupNotificationBellDot = () => {
+    const bellBtn = document.getElementById("btn-notify");
+    if (!bellBtn || bellBtn.dataset.dotBound === "1") return;
+    bellBtn.dataset.dotBound = "1";
+    bellBtn.style.position = "relative";
+    bellBtn.style.overflow = "visible";
+
+    const dot = document.createElement("span");
+    dot.id = "ksjp-bell-red-dot";
+    dot.style.cssText = `
+      position: absolute; top: -2px; right: -2px;
+      width: 11px; height: 11px; border-radius: 50%;
+      background: #ff1e1e; border: 2px solid #ffffff;
+      display: none; pointer-events: none;
+      box-shadow: 0 0 6px rgba(255, 30, 30, 0.85);
+    `;
+    bellBtn.appendChild(dot);
+
+    // घंटी पर टच करते ही लाल निशान हटाना और पढ़ी गई गिनती सेव करना
+    bellBtn.addEventListener("click", () => {
+      dot.style.display = "none";
+      if (latestNoticeCount > 0) {
+        try { localStorage.setItem("KSJP_SEEN_NOTICE_COUNT", String(latestNoticeCount)); } catch (e) {}
+      }
+    });
+  };
+
+  const checkNewNotices = async () => {
+    setupNotificationBellDot();
+    if (!firestoreBase) return;
+    try {
+      const res = await fetch(`${firestoreBase}/ksjp_rooms/notices/messages?pageSize=100&key=${apiKey}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const count = (data.documents || []).length;
+      latestNoticeCount = count;
+
+      const seenCount = Number(localStorage.getItem("KSJP_SEEN_NOTICE_COUNT") || 0);
+      const dot = document.getElementById("ksjp-bell-red-dot");
+      if (dot) {
+        dot.style.display = count > seenCount ? "block" : "none";
+      }
+    } catch (e) {}
   };
 
   // =========================================================================
@@ -87,14 +137,12 @@ export async function initVoiceAndConferenceSystem() {
     }
   };
 
-  // कॉन्फ्रेंस रूम खोलने पर दिखने वाला तैयार लेआउट (बिना माइक व चैट बॉक्स के)
   const openConferenceRoomPreview = async () => {
     document.getElementById("ksjp-conf-room")?.remove();
     const room = document.createElement("div");
     room.id = "ksjp-conf-room";
     room.style.cssText = "position:fixed;inset:0;width:100vw;height:100dvh;background:#f8fafc;display:flex;flex-direction:column;z-index:10002;";
 
-    // क्लाउड से जुड़े हुए सदस्यों की प्रोफ़ाइल फ़ोटो लाना
     let members = [];
     if (firestoreBase) {
       try {
@@ -162,7 +210,6 @@ export async function initVoiceAndConferenceSystem() {
     callBtn.style.cssText = "margin-left:auto;background:#00c853;color:#fff;border:none;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:800;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.25);";
 
     if (roomTitle === "बोर्ड रूम") {
-      // बोर्ड रूम: सभी एडमिन + Site Manager को एक साथ रिंग भेजने वाला बटन
       callBtn.textContent = "🎙️ बातचीत करें";
       callBtn.onclick = async () => {
         if (!firestoreBase) return;
@@ -183,7 +230,6 @@ export async function initVoiceAndConferenceSystem() {
       };
       header.appendChild(callBtn);
     } else if (roomTitle !== "🔔 पार्टी सूचना केंद्र") {
-      // 1-to-1 निजी चैट: केवल सामने वाले एक व्यक्ति को लाइव ऑडियो कॉल
       callBtn.textContent = "📞 कॉल";
       callBtn.onclick = () => startDirectWebRTCCall(roomTitle);
       header.appendChild(callBtn);
@@ -236,12 +282,10 @@ export async function initVoiceAndConferenceSystem() {
     }
   };
 
-  // कॉल लगाने वाला (Caller)
   const startDirectWebRTCCall = async (targetTitle) => {
     const me = getMe();
     if (!me || !firestoreBase) return;
 
-    // सभी सदस्यों में से नाम मिलाकर लक्ष्य सीट पहचानना
     let targetSeat = "";
     try {
       const mRes = await fetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
@@ -277,7 +321,7 @@ export async function initVoiceAndConferenceSystem() {
       const offer = await activePC.createOffer();
       await activePC.setLocalDescription(offer);
 
-      await new Promise((r) => setTimeout(r, 900)); // ICE उम्मीदवारों के लिए हल्का इंतज़ार
+      await new Promise((r) => setTimeout(r, 900));
 
       await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`, {
         method: "PATCH",
@@ -321,17 +365,17 @@ export async function initVoiceAndConferenceSystem() {
   };
 
   // =========================================================================
-  // भाग D: आने वाली 1-to-1 कॉल और बोर्ड रूम रिंग की जाँच (हर 3 सेकंड में)
+  // भाग D: आने वाली 1-to-1 कॉल, बोर्ड रूम रिंग और नई सूचनाओं की जाँच (हर 3 सेकंड में)
   // =========================================================================
   let lastBoardRingTs = Date.now();
   setInterval(async () => {
     injectConferenceCard();
     attachRoomCallButtons();
+    checkNewNotices();
 
     const me = getMe();
     if (!me || !firestoreBase) return;
 
-    // 1. 1-to-1 आने वाली कॉल जाँचना
     if (!activePC && !document.getElementById("ksjp-call-overlay")) {
       const callDocId = `direct_${me.seatId}`;
       try {
@@ -386,7 +430,6 @@ export async function initVoiceAndConferenceSystem() {
       } catch (e) {}
     }
 
-    // 2. बोर्ड रूम सामूहिक रिंग जाँचना
     try {
       const bRes = await fetch(`${firestoreBase}/ksjp_calls/board_ring?key=${apiKey}`);
       if (bRes.ok) {
@@ -404,4 +447,5 @@ export async function initVoiceAndConferenceSystem() {
   }, 3000);
 
   injectConferenceCard();
+  checkNewNotices();
 }

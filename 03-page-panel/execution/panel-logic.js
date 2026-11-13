@@ -380,7 +380,7 @@ export async function showAdminPanel() {
     }
   };
 
-  // सख्त गोपनीयता नियम के साथ कक्ष खोलना
+  // सख्त गोपनीयता नियम के साथ कक्ष खोलना (सभी सदस्यों के बीच 1-to-1 निजी चैट)
   const openRoom = async (roomId, title) => {
     const me = getLocalUser();
     if (!me) {
@@ -388,14 +388,12 @@ export async function showAdminPanel() {
       return;
     }
 
-    // नियम: admin-1 से admin-5 तक के कक्ष केवल उसी एडमिन और Site Manager के लिए निजी रहेंगे
-    if (roomId.startsWith("admin-")) {
-      const isAllowed = (me.seatId === "site-manager" || me.seatId === roomId);
-      if (!isAllowed) {
-        alert(`🔒 गोपनीयता नियम: यह (${title}) और Site Manager का निजी कक्ष है। अन्य एडमिन को इसे देखने की अनुमति नहीं है।`);
-        return;
-      }
+    const isDirectChat = (roomId === "site-manager" || roomId.startsWith("admin-"));
+    if (isDirectChat && me.seatId === roomId) {
+      alert("यह आपकी अपनी सीट है। निजी बातचीत करने के लिए किसी दूसरे सदस्य या Site Manager के कार्ड पर टच करें।");
+      return;
     }
+    const activeRoomId = isDirectChat ? [me.seatId, roomId].sort().join("__") : roomId;
 
     document.getElementById("ksjp-room")?.remove();
     const room = document.createElement("div");
@@ -404,12 +402,12 @@ export async function showAdminPanel() {
 
     const privacyNote = roomId === "board-room"
       ? "🌐 सामूहिक कक्ष: यहाँ सभी सक्रिय सदस्य संदेश देख और लिख सकेंगे।"
-      : roomId.startsWith("admin-")
-        ? "🔒 निजी 1-to-1 कक्ष: यह संवाद केवल आपके और Site Manager के बीच गोपनीय है।"
+      : isDirectChat
+        ? `🔒 निजी 1-to-1 चैट: यह बातचीत केवल आपके और ${title} के बीच गोपनीय है (कोई तीसरा नहीं पढ़ सकता)।`
         : "📢 आधिकारिक कक्ष";
 
     const loadMessages = async () => {
-      const list = await cloudGetPosts(roomId);
+      const list = await cloudGetPosts(activeRoomId);
       const box = document.getElementById("room-list");
       if (!box) return;
       box.innerHTML = list.length === 0
@@ -456,7 +454,7 @@ export async function showAdminPanel() {
       const txt = inp.value.trim();
       if (!txt) return;
       inp.value = "";
-      await cloudAddPost(roomId, {
+      await cloudAddPost(activeRoomId, {
         name: me.name,
         seat: me.seatId.toUpperCase(),
         photo: me.photo || "",

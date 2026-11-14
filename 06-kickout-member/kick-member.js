@@ -1,5 +1,5 @@
 // 06-kick-member/kick-member.js
-// एडमिन पैनल में सामान्य सदस्यों को देखने और किसी भी शरारती सदस्य को हटाने (Kick/Delete) का मॉड्यूल
+// एडमिन पैनल में सामान्य सदस्यों को देखने और हटाने (Kick/Delete) का मॉड्यूल
 
 export async function initKickMemberTool() {
   let projectId = "";
@@ -19,16 +19,19 @@ export async function initKickMemberTool() {
   };
 
   function mountKickButton() {
-    const headerActions = document.querySelector(".header-actions");
-    if (!headerActions || document.getElementById("btn-kick-members-panel")) return;
+    // अगर बटन पहले से है तो दोबारा न बनाएँ
+    if (document.getElementById("btn-kick-members-panel")) return;
 
-    const btn = document.createElement("div");
+    // हेडर या एक्शन बार ढूँढना, जहाँ भी जगह मिले
+    const headerActions = document.querySelector(".header-actions") || document.querySelector("header") || document.body;
+    
+    const btn = document.createElement("button");
     btn.id = "btn-kick-members-panel";
     btn.title = "सदस्य प्रबंधन / हटाएं";
-    btn.style.cssText = "padding:0 10px;height:34px;border-radius:999px;background:#fee2e2;color:#b91c1c;border:1.5px solid #ffffff;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:900;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);user-select:none;";
-    btn.textContent = "सदस्य हटाएं";
+    btn.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:999px;background:#dc2626;color:#ffffff;border:2px solid #ffffff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,0.4);user-select:none;";
+    btn.innerHTML = "🗑️ सदस्य प्रबंधन";
 
-    headerActions.insertBefore(btn, headerActions.firstChild);
+    document.body.appendChild(btn);
     btn.onclick = openMembersManager;
   }
 
@@ -37,7 +40,7 @@ export async function initKickMemberTool() {
     const validAdminSeats = ["site-manager", "admin-1", "admin-2", "admin-3", "admin-4", "admin-5"];
 
     if (!adminUser || !validAdminSeats.includes(adminUser.seatId)) {
-      alert("🔒 केवल Site Manager या Admin ही किसी सामान्य सदस्य को हटा सकते हैं।");
+      alert("🔒 केवल Site Manager या Admin ही सदस्यों को प्रबंधित कर सकते हैं।");
       return;
     }
 
@@ -49,7 +52,7 @@ export async function initKickMemberTool() {
     screen.innerHTML = `
       <header style="height:56px;background:#dc2626;color:#fff;padding:0 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
         <button id="km-back-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;cursor:pointer;">← वापस</button>
-        <div style="font-size:15.5px;font-weight:800;">सामान्य सदस्य प्रबंधन (हटाएं)</div>
+        <div style="font-size:15.5px;font-weight:800;">सामान्य सदस्य प्रबंधन (हटाएं / ब्लॉक)</div>
       </header>
       <main id="km-list-body" style="flex:1;overflow-y:auto;padding:12px;">
         <div style="text-align:center;color:#64748b;margin-top:40px;">सदस्यों की सूची लोड हो रही है...</div>
@@ -60,7 +63,10 @@ export async function initKickMemberTool() {
     document.getElementById("km-back-btn").onclick = () => screen.remove();
 
     const body = document.getElementById("km-list-body");
-    if (!firestoreBase) return;
+    if (!firestoreBase) {
+      body.innerHTML = `<div style="text-align:center;color:#dc2626;margin-top:40px;">फ़ायरबेस कॉन्फ़िगरेशन नहीं मिला।</div>`;
+      return;
+    }
 
     try {
       const res = await fetch(`${firestoreBase}/ksjp_users?pageSize=200&key=${apiKey}`);

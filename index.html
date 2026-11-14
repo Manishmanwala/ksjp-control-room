@@ -57,17 +57,13 @@
     runStartPage(async () => {
       await showAdminPanel();
 
-      // सभी प्लग-इन मॉड्यूल सुरक्षित तरीके से लोड करना (कोई फ़ाइल न भी हो तो साइट नहीं रुकेगी)
+      // आवश्यक प्लग-इन मॉड्यूल सुरक्षित तरीके से लोड करना (डबल किक-मेंबर हटा दिया गया है)
       import("./06-voice-bridge/voice-system.js")
         .then((m) => m.initVoiceAndConferenceSystem?.())
         .catch(() => {});
 
       import("./05-new-members/new-members.js")
         .then((m) => m.initNewMembersApproval?.())
-        .catch(() => {});
-
-      import("./06-kick-member/kick-member.js")
-        .then((m) => m.initKickMemberTool?.())
         .catch(() => {});
     });
   </script>

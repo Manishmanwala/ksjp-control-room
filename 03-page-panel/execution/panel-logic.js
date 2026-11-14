@@ -855,7 +855,7 @@ export async function showAdminPanel() {
   // सदस्य व एडमिन प्रबंधन (Kick/Reset Member Tool) को स्वतः सक्रिय करना
   // =========================================================================
   try {
-    const kickModule = await import("../../06-kick-member/kick-member.js");
+    "const kickModule = await import("../../06-kick-member/kick-member.js";
     if (kickModule && kickModule.initKickMemberTool) {
       kickModule.initKickMemberTool();
     }

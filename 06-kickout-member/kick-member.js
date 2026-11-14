@@ -1,5 +1,5 @@
 // 06-kick-member/kick-member.js
-// एडमिन पैनल में सामान्य सदस्यों को देखने और हटाने (Kick/Delete) का मॉड्यूल
+// एडमिन पैनल में सदस्यों और एडमिन सीटों को प्रबंधित करने (हटाने/रीसेट) का मॉड्यूल
 
 export async function initKickMemberTool() {
   let projectId = "";
@@ -19,17 +19,13 @@ export async function initKickMemberTool() {
   };
 
   function mountKickButton() {
-    // अगर बटन पहले से है तो दोबारा न बनाएँ
     if (document.getElementById("btn-kick-members-panel")) return;
 
-    // हेडर या एक्शन बार ढूँढना, जहाँ भी जगह मिले
-    const headerActions = document.querySelector(".header-actions") || document.querySelector("header") || document.body;
-    
     const btn = document.createElement("button");
     btn.id = "btn-kick-members-panel";
-    btn.title = "सदस्य प्रबंधन / हटाएं";
+    btn.title = "सदस्य व एडमिन प्रबंधन / हटाएं";
     btn.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:999px;background:#dc2626;color:#ffffff;border:2px solid #ffffff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,0.4);user-select:none;";
-    btn.innerHTML = "🗑️ सदस्य प्रबंधन";
+    btn.innerHTML = "🗑️ सदस्य व एडमिन प्रबंधन";
 
     document.body.appendChild(btn);
     btn.onclick = openMembersManager;
@@ -52,10 +48,10 @@ export async function initKickMemberTool() {
     screen.innerHTML = `
       <header style="height:56px;background:#dc2626;color:#fff;padding:0 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
         <button id="km-back-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;cursor:pointer;">← वापस</button>
-        <div style="font-size:15.5px;font-weight:800;">सामान्य सदस्य प्रबंधन (हटाएं / ब्लॉक)</div>
+        <div style="font-size:15.5px;font-weight:800;">सदस्य व एडमिन नियंत्रण कक्ष</div>
       </header>
       <main id="km-list-body" style="flex:1;overflow-y:auto;padding:12px;">
-        <div style="text-align:center;color:#64748b;margin-top:40px;">सदस्यों की सूची लोड हो रही है...</div>
+        <div style="text-align:center;color:#64748b;margin-top:40px;">डेटा लोड हो रहा है...</div>
       </main>
     `;
 
@@ -69,6 +65,7 @@ export async function initKickMemberTool() {
     }
 
     try {
+      // 1. सामान्य सदस्य लोड करना
       const res = await fetch(`${firestoreBase}/ksjp_users?pageSize=200&key=${apiKey}`);
       const data = res.ok ? await res.json() : { documents: [] };
       const members = (data.documents || []).map((doc) => {
@@ -76,6 +73,7 @@ export async function initKickMemberTool() {
         const f = doc.fields || {};
         return {
           id,
+          type: "user",
           name: f.name?.stringValue || "सदस्य",
           phone: f.phone?.stringValue || id,
           address: f.address?.stringValue || f.village?.stringValue || "",
@@ -84,24 +82,50 @@ export async function initKickMemberTool() {
         };
       });
 
-      if (members.length === 0) {
-        body.innerHTML = `<div style="text-align:center;color:#64748b;margin-top:50px;">अभी कोई सामान्य सदस्य मौजूद नहीं है।</div>`;
+      // 2. एडमिन सीटों (admin-1 से admin-5) को सूची में जोड़ना ताकि साइट मैनेजर उन्हें (या खुद की एडमिन सीट को) हटा सके
+      let adminSeatsList = [];
+      if (adminUser.seatId === "site-manager") {
+        for (let i = 1; i <= 5; i++) {
+          const seatKey = `admin-${i}`;
+          try {
+            const seatRes = await fetch(`${firestoreBase}/ksjp_members/${seatKey}?key=${apiKey}`);
+            if (seatRes.ok) {
+              const seatJson = await seatRes.json();
+              const f = seatJson.fields || {};
+              adminSeatsList.push({
+                id: seatKey,
+                type: "admin-seat",
+                name: f.name?.stringValue || `Admin ${i}`,
+                phone: f.phone?.stringValue || seatKey,
+                address: `पद: एडमिन ${i} (हटाने योग्य)`,
+                photo: "",
+                status: "approved"
+              });
+            }
+          } catch (e) {}
+        }
+      }
+
+      const allItems = [...adminSeatsList, ...members];
+
+      if (allItems.length === 0) {
+        body.innerHTML = `<div style="text-align:center;color:#64748b;margin-top:50px;">कोई सदस्य या एडमिन मौजूद नहीं है।</div>`;
         return;
       }
 
-      body.innerHTML = members.map((m, i) => `
-        <div id="km-card-${i}" style="background:#ffffff;border:1.5px solid #cbd5e1;border-radius:14px;padding:11px;margin-bottom:9px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      body.innerHTML = allItems.map((m, i) => `
+        <div id="km-card-${i}" style="background:#ffffff;border:1.5px solid ${m.type === 'admin-seat' ? '#dc2626' : '#cbd5e1'};border-radius:14px;padding:11px;margin-bottom:9px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
           <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-            <div style="width:42px;height:42px;border-radius:50%;background:#0f172a;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+            <div style="width:42px;height:42px;border-radius:50%;background:${m.type === 'admin-seat' ? '#dc2626' : '#0f172a'};color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
               ${m.photo ? `<img src="${m.photo}" style="width:100%;height:100%;object-fit:cover;" />` : m.name.charAt(0)}
             </div>
             <div style="min-width:0;">
-              <div style="font-size:14.5px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.name}</div>
-              <div style="font-size:11.5px;color:#475569;">📞 ${m.phone} • ${m.status === "approved" ? "✅ स्वीकृत" : "👻 भूत मोड"}</div>
+              <div style="font-size:14.5px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.name} ${m.type === 'admin-seat' ? '👑 (एडमिन सीट)' : ''}</div>
+              <div style="font-size:11.5px;color:#475569;">📞 ${m.phone} • ${m.address || (m.status === "approved" ? "✅ स्वीकृत" : "👻 भूत मोड")}</div>
             </div>
           </div>
           <button class="do-kick-btn" data-idx="${i}" style="padding:7px 12px;background:#ef4444;color:#fff;border:none;border-radius:999px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">
-            ❌ हटाएं
+            ${m.type === 'admin-seat' ? '🔓 एडमिन पद हटाएं' : '❌ हटाएं'}
           </button>
         </div>
       `).join("");
@@ -109,20 +133,32 @@ export async function initKickMemberTool() {
       body.querySelectorAll(".do-kick-btn").forEach((btn) => {
         btn.onclick = async () => {
           const idx = Number(btn.getAttribute("data-idx"));
-          const target = members[idx];
+          const target = allItems[idx];
           if (!target) return;
 
-          if (!confirm(`क्या आप वाकई "${target.name}" (${target.phone}) को पार्टी की सदस्यता से हटाना चाहते हैं?`)) return;
+          // केवल Site Manager की मुख्य सीट को हटाने पर रोक है, एडमिन सीट (चाहे खुद की हो) को हटाया जा सकता है
+          if (target.id === "site-manager") {
+            alert("🛡️ सुरक्षा नियम: मुख्य 'Site Manager' पद सुरक्षित है, इसे हटाया नहीं जा सकता!");
+            return;
+          }
+
+          if (!confirm(`क्या आप वाकई "${target.name}" (${target.id === 'admin-seat' ? 'एडमिन पद' : target.phone}) को हटाना चाहते हैं?`)) return;
 
           btn.disabled = true;
           btn.textContent = "हट रहा है...";
 
-          await fetch(`${firestoreBase}/ksjp_public_members/${target.phone}?key=${apiKey}`, { method: "DELETE" });
-          await fetch(`${firestoreBase}/ksjp_users/${target.phone}?key=${apiKey}`, { method: "DELETE" });
-          await fetch(`${firestoreBase}/ksjp_membership_requests/${target.phone}?key=${apiKey}`, { method: "DELETE" });
+          if (target.type === "admin-seat") {
+            // एडमिन सीट (चाहे खुद की हो या किसी और की) को फायरबेस से डिलीट करना
+            await fetch(`${firestoreBase}/ksjp_members/${target.id}?key=${apiKey}`, { method: "DELETE" });
+          } else {
+            // सामान्य सदस्य को सभी जगहों से हटाना
+            await fetch(`${firestoreBase}/ksjp_public_members/${target.phone}?key=${apiKey}`, { method: "DELETE" });
+            await fetch(`${firestoreBase}/ksjp_users/${target.phone}?key=${apiKey}`, { method: "DELETE" });
+            await fetch(`${firestoreBase}/ksjp_membership_requests/${target.phone}?key=${apiKey}`, { method: "DELETE" });
+          }
 
           document.getElementById(`km-card-${idx}`)?.remove();
-          alert(`✅ ${target.name} को सफलतापूर्वक हटा दिया गया है।`);
+          alert(`✅ "${target.name}" को सफलतापूर्वक हटा दिया गया है।`);
         };
       });
     } catch (e) {

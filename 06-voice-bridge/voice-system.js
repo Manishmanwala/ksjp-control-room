@@ -1,5 +1,7 @@
 // 06-voice-bridge/voice-system.js
-// बिना पेज लोड रोके असली Firebase SMS OTP + Site Manager अनलॉक पावर + कॉन्फ्रेंस रूम
+// 1. बिना SMS OTP के 10 अंकों के वैध भारतीय मोबाइल नंबर की अनिवार्य जाँच (डेटाबेस सुरक्षा हेतु)
+// 2. Site Manager (मनीष कश्यप) को खुद को या किसी भी एडमिन को हटाने/अनलॉक करने की पावर
+// 3. घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम लाइव चैट
 
 export async function initVoiceAndConferenceSystem() {
   let firebaseConfig = null;
@@ -15,19 +17,6 @@ export async function initVoiceAndConferenceSystem() {
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
 
-  // Firebase Auth को केवल बटन दबाने पर लोड करने वाला सुरक्षित फंक्शन
-  let cachedAuthBundle = null;
-  const loadFirebaseAuthOnDemand = async () => {
-    if (cachedAuthBundle) return cachedAuthBundle;
-    const appMod = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const authMod = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
-    const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(firebaseConfig);
-    const auth = authMod.getAuth(app);
-    auth.languageCode = "hi";
-    cachedAuthBundle = { auth, RecaptchaVerifier: authMod.RecaptchaVerifier, signInWithPhoneNumber: authMod.signInWithPhoneNumber };
-    return cachedAuthBundle;
-  };
-
   const getMe = () => {
     try {
       return JSON.parse(localStorage.getItem("KSJP_CURRENT_SEAT_USER")) || null;
@@ -35,6 +24,19 @@ export async function initVoiceAndConferenceSystem() {
       return null;
     }
   };
+
+  // वैध भारतीय मोबाइल नंबर की कड़ी जाँच (नकली व क्रमवार नंबरों को रोकना)
+  function isGenuineIndianMobile(num) {
+    if (!/^[6-9]\d{9}$/.test(num)) return false;
+    if (/^(\d)\1{9}$/.test(num)) return false; // जैसे 9999999999, 8888888888
+    if (/^(\d\d)\1{4}$/.test(num)) return false; // जैसे 9898989898
+    const fakeList = [
+      "1234567890", "9876543210", "6789012345",
+      "7890123456", "8901234567", "9012345678", "6543210987"
+    ];
+    if (fakeList.includes(num)) return false;
+    return true;
+  }
 
   // =========================================================================
   // भाग 1: Site Manager को खुद को और किसी भी एडमिन को हटाने/अनलॉक करने की पावर
@@ -81,7 +83,7 @@ export async function initVoiceAndConferenceSystem() {
         if (seatId === "site-manager") {
           localStorage.removeItem("KSJP_CURRENT_SEAT_USER");
         }
-        alert(`✅ "${nameText}" को हटा दिया गया है! अब असली SMS OTP के साथ जुड़ सकते हैं।`);
+        alert(`✅ "${nameText}" को हटा दिया गया है! अब नए सदस्य जुड़ सकते हैं।`);
         location.reload();
       };
 
@@ -90,123 +92,61 @@ export async function initVoiceAndConferenceSystem() {
   };
 
   // =========================================================================
-  // भाग 2: असली Firebase SMS OTP सत्यापन (Real Phone Verification)
+  // भाग 2: अनिवार्य 10-अंक भारतीय मोबाइल नंबर जाँच (बिना SMS OTP के)
   // =========================================================================
-  let confirmationResult = null;
-  let verifiedPhoneNumber = "";
-
-  const enforceRealFirebaseOtp = () => {
+  const enforceCompulsoryValidMobile = () => {
     const phoneInput = document.querySelector('input[type="tel"], input[placeholder*="मोबाइल"], input[placeholder*="नंबर"]');
-    if (!phoneInput || phoneInput.dataset.realOtpGuarded === "1") return;
-    phoneInput.dataset.realOtpGuarded = "1";
+    if (!phoneInput || phoneInput.dataset.mobileRuleBound === "1") return;
+    phoneInput.dataset.mobileRuleBound = "1";
+    phoneInput.setAttribute("maxlength", "10");
+    phoneInput.setAttribute("required", "true");
 
     const parentForm = phoneInput.closest("form") || phoneInput.parentElement;
     if (!parentForm) return;
 
-    const otpBox = document.createElement("div");
-    otpBox.style.cssText = "margin: 8px 0; padding: 10px; background: #fff7ed; border: 1.5px solid #ff6b00; border-radius: 12px;";
-    otpBox.innerHTML = `
-      <div style="font-size: 11.5px; font-weight: 800; color: #c2410c; margin-bottom: 6px;">
-        📲 असली मोबाइल SMS सत्यापन अनिवार्य (बिना SMS OTP सीट लॉक नहीं होगी)
-      </div>
-      <div id="ksjp-recaptcha-container"></div>
-      <button type="button" id="ksjp-real-send-otp" style="width:100%; padding: 8px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer; margin-bottom: 6px;">
-        📩 मोबाइल पर असली OTP भेजें
-      </button>
-      <div id="ksjp-real-otp-row" style="display: none; gap: 6px;">
-        <input type="number" id="ksjp-real-otp-code" placeholder="SMS में आया 6 अंकों का OTP लिखें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
-        <button type="button" id="ksjp-real-verify-otp" style="padding: 7px 12px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
-          पुष्टि करें
-        </button>
-      </div>
-      <div id="ksjp-real-otp-msg" style="font-size: 11.5px; font-weight: 700; margin-top: 5px; color: #475569;"></div>
-    `;
-    phoneInput.insertAdjacentElement("afterend", otpBox);
+    const hintBox = document.createElement("div");
+    hintBox.id = "ksjp-mobile-status-hint";
+    hintBox.style.cssText = "font-size: 11.5px; font-weight: 700; margin: 4px 0 6px 2px; color: #0369a1;";
+    hintBox.textContent = "📱 10 अंकों का वैध भारतीय मोबाइल नंबर अनिवार्य है (डेटाबेस में सुरक्षित रहेगा)";
+    phoneInput.insertAdjacentElement("afterend", hintBox);
 
-    const sendBtn = document.getElementById("ksjp-real-send-otp");
-    const otpRow = document.getElementById("ksjp-real-otp-row");
-    const codeInp = document.getElementById("ksjp-real-otp-code");
-    const verifyBtn = document.getElementById("ksjp-real-verify-otp");
-    const msgEl = document.getElementById("ksjp-real-otp-msg");
-
-    sendBtn.onclick = async () => {
-      const raw = phoneInput.value.replace(/\D/g, "");
-      if (!/^[6-9]\d{9}$/.test(raw) || /^(\d)\1{9}$/.test(raw)) {
-        msgEl.style.color = "#dc2626";
-        msgEl.textContent = "❌ कृपया 10 अंकों का सही भारतीय मोबाइल नंबर दर्ज करें।";
-        return;
+    phoneInput.addEventListener("input", () => {
+      const digits = phoneInput.value.replace(/\D/g, "").slice(0, 10);
+      phoneInput.value = digits;
+      if (digits.length === 0) {
+        hintBox.style.color = "#0369a1";
+        hintBox.textContent = "📱 10 अंकों का वैध भारतीय मोबाइल नंबर अनिवार्य है (डेटाबेस में सुरक्षित रहेगा)";
+      } else if (digits.length < 10) {
+        hintBox.style.color = "#b45309";
+        hintBox.textContent = `⏳ ${digits.length}/10 अंक दर्ज किए गए हैं...`;
+      } else if (isGenuineIndianMobile(digits)) {
+        hintBox.style.color = "#16a34a";
+        hintBox.textContent = `✅ वैध 10-अंक मोबाइल नंबर (+91 ${digits}) — डेटाबेस में सुरक्षित होने के लिए तैयार`;
+      } else {
+        hintBox.style.color = "#dc2626";
+        hintBox.textContent = "❌ यह फ़र्ज़ी या अमान्य नंबर है! कृपया अपना असली भारतीय मोबाइल नंबर डालें।";
       }
-      if (!firebaseConfig) {
-        msgEl.style.color = "#dc2626";
-        msgEl.textContent = "⚠️ Firebase कॉन्फ़िगरेशन फ़ाइल लोड नहीं हो पाई।";
-        return;
-      }
-
-      sendBtn.disabled = true;
-      sendBtn.textContent = "SMS भेजा जा रहा है...";
-      msgEl.style.color = "#0369a1";
-      msgEl.textContent = "कृपया प्रतीक्षा करें, आपके नंबर पर SMS भेजा जा रहा है...";
-
-      try {
-        const { auth, RecaptchaVerifier, signInWithPhoneNumber } = await loadFirebaseAuthOnDemand();
-        if (!window.ksjpRecaptchaVerifier) {
-          window.ksjpRecaptchaVerifier = new RecaptchaVerifier(auth, "ksjp-recaptcha-container", {
-            size: "invisible"
-          });
-        }
-        const fullPhone = `+91${raw}`;
-        confirmationResult = await signInWithPhoneNumber(auth, fullPhone, window.ksjpRecaptchaVerifier);
-        otpRow.style.display = "flex";
-        sendBtn.textContent = "🔄 दोबारा OTP भेजें";
-        sendBtn.disabled = false;
-        msgEl.style.color = "#16a34a";
-        msgEl.textContent = `✅ +91 ${raw} पर असली SMS OTP भेज दिया गया है! मैसेज देखकर कोड दर्ज करें।`;
-      } catch (err) {
-        sendBtn.disabled = false;
-        sendBtn.textContent = "📩 मोबाइल पर असली OTP भेजें";
-        msgEl.style.color = "#dc2626";
-        msgEl.textContent = `❌ SMS नहीं जा सका: ${err?.message || "कृपया इंटरनेट और Firebase सेटिंग जाँचें।"}`;
-      }
-    };
-
-    verifyBtn.onclick = async () => {
-      const code = codeInp.value.trim();
-      if (!confirmationResult || code.length < 6) {
-        msgEl.style.color = "#dc2626";
-        msgEl.textContent = "❌ कृपया SMS में आया 6 अंकों का OTP दर्ज करें।";
-        return;
-      }
-      verifyBtn.disabled = true;
-      verifyBtn.textContent = "जाँच हो रही है...";
-      try {
-        await confirmationResult.confirm(code);
-        const raw = phoneInput.value.replace(/\D/g, "");
-        verifiedPhoneNumber = raw;
-        phoneInput.readOnly = true;
-        phoneInput.style.background = "#f0fdf4";
-        otpRow.style.display = "none";
-        sendBtn.style.display = "none";
-        msgEl.style.color = "#16a34a";
-        msgEl.textContent = `✅ मोबाइल नंबर (+91 ${raw}) असली SMS द्वारा प्रमाणित हो गया है! अब आप पद लॉक कर सकते हैं।`;
-      } catch (err) {
-        verifyBtn.disabled = false;
-        verifyBtn.textContent = "पुष्टि करें";
-        msgEl.style.color = "#dc2626";
-        msgEl.textContent = "❌ गलत OTP कोड! कृपया अपने SMS इनबॉक्स में आया सही कोड डालें।";
-      }
-    };
+    });
 
     parentForm.querySelectorAll("button").forEach((btn) => {
-      if (btn.id && btn.id.startsWith("ksjp-")) return;
-      if (btn.dataset.realSubmitLock === "1") return;
-      btn.dataset.realSubmitLock = "1";
+      if (btn.id === "close-mod" || (btn.id && btn.id.startsWith("btn-"))) return;
+      if (btn.dataset.mobileSubmitLock === "1") return;
+      btn.dataset.mobileSubmitLock = "1";
 
       btn.addEventListener("click", (ev) => {
         const currentRaw = phoneInput.value.replace(/\D/g, "");
-        if (!verifiedPhoneNumber || verifiedPhoneNumber !== currentRaw) {
+        if (!currentRaw) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
-          alert("⚠️ सुरक्षा नियम: पहले '📩 मोबाइल पर असली OTP भेजें' दबाकर SMS से अपना नंबर प्रमाणित करें!");
+          alert("⚠️ मोबाइल नंबर अनिवार्य है! बिना 10 अंकों का मोबाइल नंबर डाले आप आगे नहीं बढ़ सकते।");
+          phoneInput.focus();
+          return;
+        }
+        if (!isGenuineIndianMobile(currentRaw)) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          alert("❌ कृपया 10 अंकों का सही और असली भारतीय मोबाइल नंबर दर्ज करें (फ़र्ज़ी नंबर मान्य नहीं हैं)।");
+          phoneInput.focus();
         }
       }, true);
     });
@@ -351,12 +291,12 @@ export async function initVoiceAndConferenceSystem() {
   setInterval(() => {
     injectConferenceCard();
     attachSiteManagerResetPower();
-    enforceRealFirebaseOtp();
+    enforceCompulsoryValidMobile();
     checkNewNotices();
   }, 1500);
 
   injectConferenceCard();
   attachSiteManagerResetPower();
-  enforceRealFirebaseOtp();
+  enforceCompulsoryValidMobile();
   checkNewNotices();
 }

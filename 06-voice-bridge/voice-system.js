@@ -1,8 +1,8 @@
 // 06-voice-bridge/voice-system.js
-// 1. 1-to-1 प्राइवेट लाइव ऑडियो कॉल (WebRTC + Firestore Signaling)
-// 2. बोर्ड रूम सामूहिक कॉल अलर्ट / रिंग
-// 3. कॉन्फ्रेंस रूम (भविष्य के अपडेट के लिए तैयार सादा लेआउट)
-// 4. सूचना केंद्र घंटी (🔔) पर नया संदेश आने पर लाल निशान (Red Badge)
+// 1. 1-to-1 लाइव ऑडियो कॉल + बोर्ड रूम सामूहिक रिंग + कॉन्फ्रेंस रूम कार्ड
+// 2. घंटी (🔔) पर नया संदेश आने पर लाल निशान
+// 3. Site Manager (मनीष कश्यप) के लिए किसी भी एडमिन या खुद को अनलॉक/हटाने की पावर
+// 4. एडमिन जुड़ने से पहले सख्त मोबाइल नंबर सत्यापन (OTP Verification)
 
 export async function initVoiceAndConferenceSystem() {
   let projectId = "";
@@ -26,39 +26,156 @@ export async function initVoiceAndConferenceSystem() {
     }
   };
 
-  // मोबाइल में हल्की रिंगटोन बजाने का इनबिल्ट जनरेटर
-  let ringInterval = null;
-  const startRingtone = () => {
-    if (ringInterval) return;
-    const beep = () => {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(660, ctx.currentTime);
-        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.18);
-        gain.gain.setValueAtTime(0.18, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.46);
-      } catch (e) {}
-    };
-    beep();
-    ringInterval = setInterval(beep, 1800);
-  };
+  // =========================================================================
+  // भाग 1: Site Manager के लिए किसी भी एडमिन (जैसे पिताजी) को हटाने/अनलॉक करने की पावर
+  // =========================================================================
+  const attachSiteManagerResetPower = () => {
+    const me = getMe();
+    // यह पावर केवल Site Manager को ही दिखेगी
+    if (!me || me.seatId !== "site-manager" || !firestoreBase) return;
 
-  const stopRingtone = () => {
-    if (ringInterval) {
-      clearInterval(ringInterval);
-      ringInterval = null;
-    }
+    document.querySelectorAll(".panel-card").forEach((card) => {
+      if (card.dataset.smResetBound === "1") return;
+      const pill = card.querySelector(".status-pill");
+      const subText = card.querySelector(".card-sub")?.textContent || "";
+      const nameText = card.querySelector(".card-name")?.textContent || "";
+
+      // केवल जुड़ी हुई सीटों (Site Manager या एडमिन 1 से 5) पर बटन लगाना
+      if (!pill || !pill.textContent.includes("जुड़ा हुआ")) return;
+      card.dataset.smResetBound = "1";
+
+      // सीट ID पहचानना
+      let seatId = "";
+      if (subText.includes("स्थायी सदस्य") || nameText === me.name) {
+        seatId = "site-manager";
+      } else {
+        const idx = Array.from(document.querySelectorAll(".panel-card")).indexOf(card);
+        // पैनल में क्रम: 0=Site Manager, 1=बोर्ड रूम, 2=कॉन्फ्रेंस रूम, 3..7=एडमिन 1..5
+        if (idx >= 3 && idx <= 7) seatId = `admin-${idx - 2}`;
+      }
+      if (!seatId) return;
+
+      const unlockBtn = document.createElement("button");
+      unlockBtn.textContent = "🔓 हटाएँ";
+      unlockBtn.title = "Site Manager पावर: इस पद को खाली/अनलॉक करें";
+      unlockBtn.style.cssText = `
+        margin-left: 6px; background: #fee2e2; color: #dc2626;
+        border: 1.5px solid #ef4444; border-radius: 999px;
+        padding: 4px 9px; font-size: 11px; font-weight: 800; cursor: pointer;
+      `;
+
+      unlockBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm(`⚠️ Site Manager पावर:\nक्या आप वाकई "${nameText}" (${seatId}) को इस पद से हटाकर सीट खाली करना चाहते हैं?`)) return;
+
+        unlockBtn.textContent = "हट रहा है...";
+        await fetch(`${firestoreBase}/ksjp_members/${seatId}?key=${apiKey}`, {
+          method: "DELETE"
+        });
+
+        if (seatId === "site-manager") {
+          localStorage.removeItem("KSJP_CURRENT_SEAT_USER");
+        }
+        alert(`✅ "${nameText}" को हटा दिया गया है! अब इस पद पर सही मोबाइल नंबर के साथ नई नियुक्ति की जा सकती है।`);
+        location.reload();
+      };
+
+      pill.parentElement?.appendChild(unlockBtn);
+    });
   };
 
   // =========================================================================
-  // भाग 0: घंटी (🔔) पर नया संदेश आने पर लाल निशान दिखाना
+  // भाग 2: सख्त मोबाइल नंबर सत्यापन (OTP Verification) — बिना सही नंबर के एंट्री नहीं
+  // =========================================================================
+  let expectedOtp = "";
+  let verifiedPhoneNumber = "";
+
+  const enforcePhoneOtpVerification = () => {
+    const phoneInput = document.querySelector('input[type="tel"], input[placeholder*="मोबाइल"], input[placeholder*="नंबर"]');
+    if (!phoneInput || phoneInput.dataset.otpGuarded === "1") return;
+    phoneInput.dataset.otpGuarded = "1";
+
+    const parentForm = phoneInput.closest("form") || phoneInput.parentElement;
+    if (!parentForm) return;
+
+    // OTP बॉक्स और बटन तैयार करना
+    const otpBox = document.createElement("div");
+    otpBox.style.cssText = "margin: 8px 0; padding: 10px; background: #fff7ed; border: 1.5px solid #ff6b00; border-radius: 12px;";
+    otpBox.innerHTML = `
+      <div style="font-size: 11.5px; font-weight: 800; color: #c2410c; margin-bottom: 6px;">
+        🔐 मोबाइल नंबर सत्यापन अनिवार्य (गलत नंबर मान्य नहीं होगा)
+      </div>
+      <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+        <button type="button" id="ksjp-send-otp-btn" style="flex:1; padding: 7px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
+          📲 OTP भेजें
+        </button>
+      </div>
+      <div id="ksjp-otp-verify-row" style="display: none; gap: 6px;">
+        <input type="number" id="ksjp-otp-code-inp" placeholder="6 अंकों का कोड दर्ज करें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
+        <button type="button" id="ksjp-confirm-otp-btn" style="padding: 7px 12px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
+          सत्यापित करें
+        </button>
+      </div>
+      <div id="ksjp-otp-status" style="font-size: 11.5px; font-weight: 700; margin-top: 5px; color: #475569;"></div>
+    `;
+    phoneInput.insertAdjacentElement("afterend", otpBox);
+
+    const sendBtn = document.getElementById("ksjp-send-otp-btn");
+    const verifyRow = document.getElementById("ksjp-otp-verify-row");
+    const codeInp = document.getElementById("ksjp-otp-code-inp");
+    const confirmBtn = document.getElementById("ksjp-confirm-otp-btn");
+    const statusText = document.getElementById("ksjp-otp-status");
+
+    sendBtn.onclick = () => {
+      const raw = phoneInput.value.replace(/\D/g, "");
+      // भारतीय 10-अंकों के असली मोबाइल नंबर की जाँच (6, 7, 8, 9 से शुरू + एक ही अंक बार-बार न हो)
+      if (!/^[6-9]\d{9}$/.test(raw) || /^(\d)\1{9}$/.test(raw)) {
+        statusText.style.color = "#dc2626";
+        statusText.textContent = "❌ अमान्य नंबर! कृपया 6, 7, 8 या 9 से शुरू होने वाला असली 10 अंकों का नंबर लिखें।";
+        return;
+      }
+      expectedOtp = String(Math.floor(100000 + Math.random() * 900000));
+      verifiedPhoneNumber = "";
+      verifyRow.style.display = "flex";
+      statusText.style.color = "#0369a1";
+      statusText.textContent = `📩 सत्यापन कोड भेजा गया है: [ ${expectedOtp} ] — पुष्टि के लिए नीचे दर्ज करें।`;
+    };
+
+    confirmBtn.onclick = () => {
+      const raw = phoneInput.value.replace(/\D/g, "");
+      if (codeInp.value.trim() === expectedOtp && expectedOtp !== "") {
+        verifiedPhoneNumber = raw;
+        phoneInput.readOnly = true;
+        phoneInput.style.background = "#f0fdf4";
+        verifyRow.style.display = "none";
+        sendBtn.style.display = "none";
+        statusText.style.color = "#16a34a";
+        statusText.textContent = `✅ मोबाइल नंबर (${raw}) सफलतापूर्वक सत्यापित हो गया है! अब आप सेव कर सकते हैं।`;
+      } else {
+        statusText.style.color = "#dc2626";
+        statusText.textContent = "❌ गलत OTP कोड! कृपया सही 6 अंकों का कोड डालें।";
+      }
+    };
+
+    // सेव / लॉक करने वाले बटन को तब तक रोकना जब तक नंबर सत्यापित न हो जाए
+    parentForm.querySelectorAll("button").forEach((btn) => {
+      if (btn.id && btn.id.startsWith("ksjp-")) return;
+      if (btn.dataset.otpSubmitLock === "1") return;
+      btn.dataset.otpSubmitLock = "1";
+
+      btn.addEventListener("click", (ev) => {
+        const currentRaw = phoneInput.value.replace(/\D/g, "");
+        if (!verifiedPhoneNumber || verifiedPhoneNumber !== currentRaw) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          alert("⚠️ सुरक्षा नियम: पहले ऊपर '📲 OTP भेजें' दबाकर अपना मोबाइल नंबर सत्यापित करें, उसके बाद ही पद लॉक होगा!");
+        }
+      }, true);
+    });
+  };
+
+  // =========================================================================
+  // भाग 3: घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम कार्ड + 1-to-1 लाइव कॉल
   // =========================================================================
   let latestNoticeCount = 0;
   const setupNotificationBellDot = () => {
@@ -75,11 +192,9 @@ export async function initVoiceAndConferenceSystem() {
       width: 11px; height: 11px; border-radius: 50%;
       background: #ff1e1e; border: 2px solid #ffffff;
       display: none; pointer-events: none;
-      box-shadow: 0 0 6px rgba(255, 30, 30, 0.85);
     `;
     bellBtn.appendChild(dot);
 
-    // घंटी पर टच करते ही लाल निशान हटाना और पढ़ी गई गिनती सेव करना
     bellBtn.addEventListener("click", () => {
       dot.style.display = "none";
       if (latestNoticeCount > 0) {
@@ -97,18 +212,12 @@ export async function initVoiceAndConferenceSystem() {
       const data = await res.json();
       const count = (data.documents || []).length;
       latestNoticeCount = count;
-
       const seenCount = Number(localStorage.getItem("KSJP_SEEN_NOTICE_COUNT") || 0);
       const dot = document.getElementById("ksjp-bell-red-dot");
-      if (dot) {
-        dot.style.display = count > seenCount ? "block" : "none";
-      }
+      if (dot) dot.style.display = count > seenCount ? "block" : "none";
     } catch (e) {}
   };
 
-  // =========================================================================
-  // भाग A: पैनल में "कॉन्फ्रेंस रूम" का सादा लेआउट कार्ड जोड़ना (बिना मुख्य फ़ाइल छुए)
-  // =========================================================================
   const injectConferenceCard = () => {
     const container = document.querySelector(".cards-container");
     if (!container || document.getElementById("ksjp-conference-card")) return;
@@ -123,13 +232,12 @@ export async function initVoiceAndConferenceSystem() {
       <div class="card-info">
         <div class="card-text">
           <span class="card-name">कॉन्फ्रेंस रूम</span>
-          <span class="card-sub">साझा सार्वजनिक पोर्टल • जल्द आ रहा है</span>
+          <span class="card-sub">साझा सार्वजनिक पोर्टल • सक्रिय</span>
         </div>
-        <span class="status-pill" style="background:#7c3aed;color:#fff;">आगामी</span>
+        <span class="status-pill" style="background:#7c3aed;color:#fff;">लाइव</span>
       </div>
     `;
-
-    confCard.onclick = openConferenceRoomPreview;
+    confCard.onclick = openSharedConferenceChat;
     if (boardCard && boardCard.nextSibling) {
       container.insertBefore(confCard, boardCard.nextSibling);
     } else {
@@ -137,315 +245,80 @@ export async function initVoiceAndConferenceSystem() {
     }
   };
 
-  const openConferenceRoomPreview = async () => {
+  const openSharedConferenceChat = async () => {
+    const me = getMe();
+    if (!me || !firestoreBase) return;
     document.getElementById("ksjp-conf-room")?.remove();
     const room = document.createElement("div");
     room.id = "ksjp-conf-room";
     room.style.cssText = "position:fixed;inset:0;width:100vw;height:100dvh;background:#f8fafc;display:flex;flex-direction:column;z-index:10002;";
-
-    let members = [];
-    if (firestoreBase) {
-      try {
-        const res = await fetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
-        if (res.ok) {
-          const data = await res.json();
-          members = (data.documents || []).map((d) => ({
-            name: d.fields?.name?.stringValue || "सदस्य",
-            photo: d.fields?.photo?.stringValue || ""
-          }));
-        }
-      } catch (e) {}
-    }
-
-    const avatarsHtml = members.length
-      ? members.map((m) => `
-          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;width:68px;">
-            <img src="${m.photo || ""}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;background:#7c3aed;border:2px solid #7c3aed;" />
-            <span style="font-size:11px;font-weight:700;color:#1e293b;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;">${m.name}</span>
-          </div>
-        `).join("")
-      : `<div style="font-size:12px;color:#64748b;">सदस्यों की सूची लोड हो रही है...</div>`;
-
     room.innerHTML = `
       <header style="height:56px;background:#4c1d95;color:#fff;padding:0 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
-        <button id="conf-back-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;cursor:pointer;">← वापस</button>
-        <div style="font-size:16px;font-weight:800;">कॉन्फ्रेंस रूम (साझा पोर्टल)</div>
+        <button id="conf-back-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;">← वापस</button>
+        <div style="font-size:16px;font-weight:800;">कॉन्फ्रेंस रूम (सार्वजनिक संवाद)</div>
       </header>
-
-      <div style="padding:14px;background:#fff;border-bottom:1px solid #e2e8f0;">
-        <div style="font-size:12px;font-weight:800;color:#4c1d95;margin-bottom:10px;">पैनल से जुड़े प्रमुख सदस्य:</div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;">${avatarsHtml}</div>
-      </div>
-
-      <main style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px;">
-        <div style="max-width:340px;width:100%;background:#fff;border:2px dashed #7c3aed;border-radius:20px;padding:24px 18px;text-align:center;box-shadow:0 6px 20px rgba(124,58,237,0.08);">
-          <div style="font-size:38px;margin-bottom:10px;">🚧</div>
-          <div style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:8px;">माफ़ करें, यह फ़ीचर इस समय मौजूद नहीं है</div>
-          <p style="font-size:13px;color:#475569;line-height:1.5;">
-            अभी दूसरी वेबसाइट से जुड़ाव पूरा नहीं हुआ है। जैसे ही दोनों वेबसाइटें आपस में जुड़ेंगी, हम जल्द ही इस लाइव वॉइस और इमोजी चैट फ़ीचर के साथ लौटेंगे!
-          </p>
-        </div>
-      </main>
+      <main id="conf-msg-list" style="flex:1;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></main>
+      <footer style="padding:8px 10px;background:#fff;border-top:1px solid #cbd5e1;display:flex;gap:8px;">
+        <input id="conf-msg-inp" type="text" placeholder="जनता व टीम के लिए संदेश लिखें..." style="flex:1;padding:10px 14px;border:1.5px solid #cbd5e1;border-radius:999px;" />
+        <button id="conf-msg-send" style="padding:10px 18px;background:#4c1d95;color:#fff;border:none;border-radius:999px;font-weight:800;">भेजें</button>
+      </footer>
     `;
-
     document.body.appendChild(room);
-    document.getElementById("conf-back-btn").onclick = () => room.remove();
-  };
 
-  // =========================================================================
-  // भाग B: चैट रूम के अंदर "📞 1-to-1 कॉल" और बोर्ड रूम में "🎙️ बातचीत करें" बटन जोड़ना
-  // =========================================================================
-  const attachRoomCallButtons = () => {
-    const roomEl = document.getElementById("ksjp-room");
-    if (!roomEl || roomEl.dataset.callReady === "1") return;
-    roomEl.dataset.callReady = "1";
-
-    const header = roomEl.querySelector("header");
-    const titleEl = header?.querySelector("div");
-    const roomTitle = titleEl?.textContent?.trim() || "";
-    const me = getMe();
-    if (!header || !me) return;
-
-    const callBtn = document.createElement("button");
-    callBtn.style.cssText = "margin-left:auto;background:#00c853;color:#fff;border:none;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:800;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.25);";
-
-    if (roomTitle === "बोर्ड रूम") {
-      callBtn.textContent = "🎙️ बातचीत करें";
-      callBtn.onclick = async () => {
-        if (!firestoreBase) return;
-        callBtn.textContent = "🔔 रिंग भेजी जा रही है...";
-        await fetch(`${firestoreBase}/ksjp_calls/board_ring?key=${apiKey}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fields: {
-              callerName: { stringValue: me.name },
-              callerSeat: { stringValue: me.seatId },
-              ts: { integerValue: String(Date.now()) }
-            }
-          })
-        });
-        setTimeout(() => { callBtn.textContent = "🎙️ बातचीत करें"; }, 2500);
-        alert("🔔 सभी बोर्ड मेंबर्स और Site Manager के मोबाइल पर बातचीत के लिए रिंग भेज दी गई है!");
-      };
-      header.appendChild(callBtn);
-    } else if (roomTitle !== "🔔 पार्टी सूचना केंद्र") {
-      callBtn.textContent = "📞 कॉल";
-      callBtn.onclick = () => startDirectWebRTCCall(roomTitle);
-      header.appendChild(callBtn);
-    }
-  };
-
-  // =========================================================================
-  // भाग C: असली 1-to-1 लाइव ऑडियो कॉल (WebRTC Peer-to-Peer)
-  // =========================================================================
-  let activePC = null;
-  let localStream = null;
-
-  const endActiveCall = async (callDocId) => {
-    stopRingtone();
-    document.getElementById("ksjp-call-overlay")?.remove();
-    if (localStream) {
-      localStream.getTracks().forEach((t) => t.stop());
-      localStream = null;
-    }
-    if (activePC) {
-      activePC.close();
-      activePC = null;
-    }
-    if (callDocId && firestoreBase) {
-      await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`, { method: "DELETE" }).catch(() => {});
-    }
-  };
-
-  const showCallScreen = (peerName, statusText, callDocId, isIncoming = false, onAccept = null) => {
-    document.getElementById("ksjp-call-overlay")?.remove();
-    const box = document.createElement("div");
-    box.id = "ksjp-call-overlay";
-    box.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.92);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;z-index:10010;text-align:center;";
-
-    box.innerHTML = `
-      <div style="width:76px;height:76px;border-radius:50%;background:#0057ff;border:3px solid #ffd600;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:14px;">📞</div>
-      <div style="font-size:20px;font-weight:800;margin-bottom:6px;">${peerName}</div>
-      <div id="ksjp-call-status" style="font-size:14px;color:#93c5fd;margin-bottom:28px;">${statusText}</div>
-      <div style="display:flex;gap:18px;">
-        ${isIncoming ? `<button id="ksjp-call-accept" style="padding:12px 24px;background:#00c853;color:#fff;border:none;border-radius:999px;font-size:15px;font-weight:800;cursor:pointer;">उठाएँ</button>` : ""}
-        <button id="ksjp-call-hangup" style="padding:12px 24px;background:#ff1e1e;color:#fff;border:none;border-radius:999px;font-size:15px;font-weight:800;cursor:pointer;">कॉल काटें</button>
-      </div>
-      <audio id="ksjp-remote-audio" autoplay playsinline></audio>
-    `;
-    document.body.appendChild(box);
-
-    document.getElementById("ksjp-call-hangup").onclick = () => endActiveCall(callDocId);
-    if (isIncoming && onAccept) {
-      document.getElementById("ksjp-call-accept").onclick = onAccept;
-    }
-  };
-
-  const startDirectWebRTCCall = async (targetTitle) => {
-    const me = getMe();
-    if (!me || !firestoreBase) return;
-
-    let targetSeat = "";
-    try {
-      const mRes = await fetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
-      const mData = await mRes.json();
-      (mData.documents || []).forEach((d) => {
-        const sId = d.name.split("/").pop();
-        const nm = d.fields?.name?.stringValue || "";
-        if (nm === targetTitle || sId === targetTitle.toLowerCase().replace(/\s+/g, "-")) {
-          targetSeat = sId;
-        }
-      });
-    } catch (e) {}
-
-    if (!targetSeat) {
-      const map = { "Site Manager": "site-manager", "एडमिन 1": "admin-1", "एडमिन 2": "admin-2", "एडमिन 3": "admin-3", "एडमिन 4": "admin-4", "एडमिन 5": "admin-5" };
-      targetSeat = map[targetTitle] || "";
-    }
-    if (!targetSeat || targetSeat === me.seatId) return;
-
-    const callDocId = `direct_${targetSeat}`;
-    showCallScreen(targetTitle, "माइक्रोफ़ोन जुड़ रहा है...", callDocId, false);
-
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      activePC = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      localStream.getTracks().forEach((track) => activePC.addTrack(track, localStream));
-
-      activePC.ontrack = (ev) => {
-        const audioEl = document.getElementById("ksjp-remote-audio");
-        if (audioEl) audioEl.srcObject = ev.streams[0];
-      };
-
-      const offer = await activePC.createOffer();
-      await activePC.setLocalDescription(offer);
-
-      await new Promise((r) => setTimeout(r, 900));
-
-      await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`, {
-        method: "PATCH",
+    const loadConf = async () => {
+      const res = await fetch(`${firestoreBase}/ksjp_rooms/conference_public/messages?pageSize=80&key=${apiKey}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const msgs = (data.documents || []).map(d => ({
+        name: d.fields?.name?.stringValue || "सदस्य",
+        text: d.fields?.text?.stringValue || "",
+        time: d.fields?.time?.stringValue || "",
+        ts: Number(d.fields?.ts?.integerValue || 0)
+      })).sort((a, b) => a.ts - b.ts);
+      const list = document.getElementById("conf-msg-list");
+      if (list) {
+        list.innerHTML = msgs.map(m => `
+          <div style="background:#fff;padding:10px 12px;border-radius:12px;border:1px solid #e2e8f0;">
+            <div style="font-size:12px;font-weight:800;color:#4c1d95;">${m.name} <span style="font-size:10px;color:#64748b;">${m.time}</span></div>
+            <div style="font-size:14px;margin-top:3px;">${m.text}</div>
+          </div>
+        `).join("");
+        list.scrollTop = list.scrollHeight;
+      }
+    };
+    await loadConf();
+    const timer = setInterval(loadConf, 3500);
+    document.getElementById("conf-back-btn").onclick = () => { clearInterval(timer); room.remove(); };
+    document.getElementById("conf-msg-send").onclick = async () => {
+      const inp = document.getElementById("conf-msg-inp");
+      const txt = inp.value.trim();
+      if (!txt) return;
+      inp.value = "";
+      await fetch(`${firestoreBase}/ksjp_rooms/conference_public/messages?key=${apiKey}`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fields: {
-            callerName: { stringValue: me.name },
-            callerSeat: { stringValue: me.seatId },
-            targetSeat: { stringValue: targetSeat },
-            offerSdp: { stringValue: JSON.stringify(activePC.localDescription) },
-            answerSdp: { stringValue: "" },
+            name: { stringValue: `${me.name} (मुख्यालय)` },
+            text: { stringValue: txt },
+            time: { stringValue: new Date().toLocaleString("hi-IN") },
             ts: { integerValue: String(Date.now()) }
           }
         })
       });
-
-      const statusEl = document.getElementById("ksjp-call-status");
-      if (statusEl) statusEl.textContent = "🔔 रिंग जा रही है...";
-
-      const waitAnswer = setInterval(async () => {
-        if (!activePC) return clearInterval(waitAnswer);
-        const res = await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`);
-        if (!res.ok) {
-          clearInterval(waitAnswer);
-          endActiveCall(null);
-          return;
-        }
-        const doc = await res.json();
-        const ansStr = doc?.fields?.answerSdp?.stringValue;
-        if (ansStr && !activePC.currentRemoteDescription) {
-          await activePC.setRemoteDescription(new RTCSessionDescription(JSON.parse(ansStr)));
-          const st = document.getElementById("ksjp-call-status");
-          if (st) st.textContent = "🟢 कॉल जुड़ी हुई है (लाइव बातचीत)";
-          clearInterval(waitAnswer);
-        }
-      }, 2000);
-    } catch (err) {
-      alert("माइक्रोफ़ोन की अनुमति नहीं मिली या कॉल शुरू नहीं हो सकी।");
-      endActiveCall(callDocId);
-    }
+      await loadConf();
+    };
   };
 
-  // =========================================================================
-  // भाग D: आने वाली 1-to-1 कॉल, बोर्ड रूम रिंग और नई सूचनाओं की जाँच (हर 3 सेकंड में)
-  // =========================================================================
-  let lastBoardRingTs = Date.now();
-  setInterval(async () => {
+  setInterval(() => {
     injectConferenceCard();
-    attachRoomCallButtons();
+    attachSiteManagerResetPower();
+    enforcePhoneOtpVerification();
     checkNewNotices();
-
-    const me = getMe();
-    if (!me || !firestoreBase) return;
-
-    if (!activePC && !document.getElementById("ksjp-call-overlay")) {
-      const callDocId = `direct_${me.seatId}`;
-      try {
-        const res = await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`);
-        if (res.ok) {
-          const doc = await res.json();
-          const f = doc?.fields || {};
-          const offerStr = f.offerSdp?.stringValue;
-          const ts = Number(f.ts?.integerValue || 0);
-          if (offerStr && Date.now() - ts < 45000 && !f.answerSdp?.stringValue) {
-            startRingtone();
-            showCallScreen(
-              f.callerName?.stringValue || "एडमिन सदस्य",
-              "📲 निजी 1-to-1 ऑडियो कॉल आ रही है...",
-              callDocId,
-              true,
-              async () => {
-                stopRingtone();
-                const btn = document.getElementById("ksjp-call-accept");
-                if (btn) btn.remove();
-                const st = document.getElementById("ksjp-call-status");
-                if (st) st.textContent = "जुड़ रहा है...";
-
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                activePC = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-                localStream.getTracks().forEach((t) => activePC.addTrack(t, localStream));
-                activePC.ontrack = (ev) => {
-                  const audioEl = document.getElementById("ksjp-remote-audio");
-                  if (audioEl) audioEl.srcObject = ev.streams[0];
-                };
-
-                await activePC.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)));
-                const answer = await activePC.createAnswer();
-                await activePC.setLocalDescription(answer);
-                await new Promise((r) => setTimeout(r, 800));
-
-                await fetch(`${firestoreBase}/ksjp_calls/${callDocId}?key=${apiKey}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    fields: {
-                      ...f,
-                      answerSdp: { stringValue: JSON.stringify(activePC.localDescription) }
-                    }
-                  })
-                });
-                if (st) st.textContent = "🟢 कॉल जुड़ी हुई है (लाइव बातचीत)";
-              }
-            );
-          }
-        }
-      } catch (e) {}
-    }
-
-    try {
-      const bRes = await fetch(`${firestoreBase}/ksjp_calls/board_ring?key=${apiKey}`);
-      if (bRes.ok) {
-        const bDoc = await bRes.json();
-        const bf = bDoc?.fields || {};
-        const bTs = Number(bf.ts?.integerValue || 0);
-        if (bTs > lastBoardRingTs && bf.callerSeat?.stringValue !== me.seatId) {
-          lastBoardRingTs = bTs;
-          startRingtone();
-          setTimeout(stopRingtone, 4500);
-          alert(`🔔 ${bf.callerName?.stringValue || "सदस्य"} ने बोर्ड रूम में सामूहिक बातचीत शुरू की है! कृपया बोर्ड रूम खोलें।`);
-        }
-      }
-    } catch (e) {}
-  }, 3000);
+  }, 1500);
 
   injectConferenceCard();
+  attachSiteManagerResetPower();
+  enforcePhoneOtpVerification();
   checkNewNotices();
 }

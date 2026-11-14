@@ -36,6 +36,7 @@
     import { runStartPage } from "./02-start-page/execution/start.js";
     import { showAdminPanel } from "./03-page-panel/execution/panel-logic.js";
     import { initNewMembersApproval } from "./05-new-members/new-members.js";
+    import { initKickMemberTool } from "./06-kick-member/kick-member.js";
 
     // अपलोड की गई Screenshot फ़ोटो को आइकॉन में लगाना
     (async () => {
@@ -58,6 +59,7 @@
     runStartPage(async () => {
       await showAdminPanel();
       initNewMembersApproval();
+      initKickMemberTool();
     });
   </script>
 </body>

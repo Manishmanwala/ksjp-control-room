@@ -811,6 +811,7 @@ export async function showAdminPanel() {
 
     document.getElementById("back-btn").onclick = () => {
       clearInterval(poll);
+      room.roomEl?.remove();
       room.remove();
     };
 
@@ -847,6 +848,16 @@ export async function showAdminPanel() {
     const execModule = await import("../../04-execution/actions.js");
     if (execModule && execModule.initPanelActions) {
       execModule.initPanelActions();
+    }
+  } catch (e) {}
+
+  // =========================================================================
+  // सदस्य व एडमिन प्रबंधन (Kick/Reset Member Tool) को स्वतः सक्रिय करना
+  // =========================================================================
+  try {
+    const kickModule = await import("../07-kick-member/kick-member.js");
+    if (kickModule && kickModule.initKickMemberTool) {
+      kickModule.initKickMemberTool();
     }
   } catch (e) {}
 }

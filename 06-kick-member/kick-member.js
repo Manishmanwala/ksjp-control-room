@@ -179,7 +179,29 @@ export async function openMembersManager() {
   }
 }
 
-// ब्रिज जो panel-logic.js की डिमांड पूरी करता है
 export function initKickMemberTool() {
-  window.openMembersManager = openMembersManager;
+  const adminUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("KSJP_CURRENT_SEAT_USER"));
+    } catch {
+      return null;
+    }
+  })();
+
+  if (adminUser?.seatId !== "site-manager") return;
+
+  const headerActions = document.querySelector(".header-actions");
+  if (!headerActions || document.getElementById("btn-kick-member")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "btn-kick-member";
+  btn.type = "button";
+  btn.textContent = "सदस्य प्रबंधन";
+  btn.title = "सदस्य और एडमिन प्रबंधन";
+  btn.style.cssText =
+    "height:34px;padding:0 10px;border-radius:999px;background:#dc2626;color:#fff;border:1.5px solid #fff;font-weight:800;cursor:pointer;";
+
+  btn.addEventListener("click", () => openMembersManager());
+  headerActions.insertBefore(btn, headerActions.firstChild);
+}
 }

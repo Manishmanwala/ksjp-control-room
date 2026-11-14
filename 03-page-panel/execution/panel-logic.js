@@ -24,6 +24,7 @@ export async function showAdminPanel() {
       .brand-title { font-size: 17px; font-weight: 800; color: #ffffff; }
       .header-actions { display: flex; align-items: center; gap: 10px; }
       .icon-btn { width: 34px; height: 34px; border-radius: 50%; background: #000000; color: #ffffff; border: 1.5px solid rgba(255, 255, 255, 0.75); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; user-select: none; box-shadow: 0 2px 6px rgba(0,0,0,0.35); cursor: pointer; overflow: hidden; }
+      .icon-btn.records-btn { background: #00c853; color: #ffffff; border: 1.5px solid #ffffff; font-size: 15px; }
       .icon-btn.profile-p { background: #ffd600; color: #0057ff; border: 2px solid #ffffff; font-size: 14px; }
       .cards-container { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
       .panel-card { width: 100%; flex: 1; min-height: 0; padding: 0 14px; display: flex; align-items: center; gap: 12px; user-select: none; cursor: pointer; }
@@ -58,6 +59,7 @@ export async function showAdminPanel() {
         <div class="brand-title">KSJP एडमिन पैनल</div>
       </div>
       <div class="header-actions">
+        <div class="icon-btn records-btn" id="btn-all-citizens" title="पंजीकृत नागरिक रिकॉर्ड">👥</div>
         <div class="icon-btn" id="btn-notify" title="सूचनाएं">🔔</div>
         <div class="icon-btn profile-p" id="btn-profile" title="प्रोफ़ाइल">P</div>
       </div>
@@ -138,7 +140,7 @@ export async function showAdminPanel() {
   const getLocalUser = () => { try { return JSON.parse(localStorage.getItem(USER_LOCAL_KEY)) || null; } catch (e) { return null; } };
   const setLocalUser = (u) => { try { localStorage.setItem(USER_LOCAL_KEY, JSON.stringify(u)); } catch (e) {} };
 
-  // क्लाउड Firestore पर सदस्य व मैसेज सुरक्षित/पढ़ने वाले फ़ंक्शन (बिना पूरी चाबी कोड में रखे)
+  // क्लाउड Firestore पर सदस्य व मैसेज सुरक्षित/पढ़ने वाले फ़ंक्शन
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
@@ -163,6 +165,59 @@ export async function showAdminPanel() {
       });
       return out;
     } catch (e) { return {}; }
+  }
+
+  // मुख्य वेबसाइट से जुड़े सभी पंजीकृत नागरिकों का रिकॉर्ड लाना (केवल देखने के लिए)
+  async function cloudGetRegisteredUsers() {
+    if (!firestoreBase) return [];
+    const collectionsToTry = ["ksjp_users", "users", "registrations"];
+    const mergedMap = new Map();
+
+    for (const col of collectionsToTry) {
+      try {
+        const res = await fetch(`${firestoreBase}/${col}?pageSize=300&key=${apiKey}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        (data.documents || []).forEach((doc) => {
+          const docId = doc.name.split("/").pop();
+          const f = doc.fields || {};
+          const userObj = {
+            id: docId,
+            name: f.name?.stringValue || f.fullName?.stringValue || "नाम उपलब्ध नहीं",
+            phone: f.phone?.stringValue || f.mobile?.stringValue || "",
+            email: f.email?.stringValue || "",
+            emailVerified: Boolean(f.emailVerified?.booleanValue),
+            address: f.address?.stringValue || "",
+            reason: f.reason?.stringValue || f.joinReason?.stringValue || "",
+            note: f.note?.stringValue || f.bio?.stringValue || f.parchi?.stringValue || "",
+            photo: f.photo?.stringValue || f.photoURL?.stringValue || "",
+            joinedAt: f.joinedAt?.stringValue || f.createdAt?.stringValue || ""
+          };
+          mergedMap.set(userObj.phone || userObj.email || docId, userObj);
+        });
+      } catch (e) {}
+    }
+
+    // एडमिन पैनल के जुड़े हुए सदस्यों को भी सूची में शामिल करना
+    const adminMap = await cloudGetMembers();
+    Object.values(adminMap).forEach((m) => {
+      if (m && m.locked && !mergedMap.has(m.phone)) {
+        mergedMap.set(m.phone || m.seatId, {
+          id: m.seatId,
+          name: `${m.name} (${m.seatId.toUpperCase()})`,
+          phone: m.phone || "",
+          email: "एडमिन पैनल सदस्य",
+          emailVerified: true,
+          address: "KSJP नियंत्रण कक्ष",
+          reason: "पार्टी संचालन एवं प्रबंधन",
+          note: "",
+          photo: m.photo || "",
+          joinedAt: ""
+        });
+      }
+    });
+
+    return Array.from(mergedMap.values());
   }
 
   async function cloudSaveMember(rec) {
@@ -253,7 +308,6 @@ export async function showAdminPanel() {
     cachedMembers = await cloudGetMembers();
     const me = getLocalUser();
 
-    // ऊपर दाईं तरफ वाले 'P' बटन में अपनी प्रोफ़ाइल फ़ोटो दिखाना
     const topP = document.getElementById("btn-profile");
     if (topP && me) {
       const latestMe = cachedMembers[me.seatId] || me;
@@ -280,6 +334,140 @@ export async function showAdminPanel() {
         }
       }
     });
+  };
+
+  // =========================================================================
+  // सभी जुड़े हुए नागरिकों की View-Only सूची, सर्च और पूरा रिकॉर्ड कार्ड (बिना Delete/Edit)
+  // =========================================================================
+  const openCitizenRecordsViewer = async () => {
+    const me = getLocalUser();
+    if (!me) {
+      openJoinOrProfile();
+      return;
+    }
+
+    document.getElementById("ksjp-records-screen")?.remove();
+    const screen = document.createElement("div");
+    screen.id = "ksjp-records-screen";
+    screen.style.cssText = "position:fixed;inset:0;width:100vw;height:100dvh;background:#f1f5f9;display:flex;flex-direction:column;z-index:10001;";
+
+    screen.innerHTML = `
+      <header style="height:56px;background:#0057ff;color:#fff;padding:0 14px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button id="rec-back-btn" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:999px;font-weight:800;cursor:pointer;">← वापस</button>
+          <div style="font-size:15.5px;font-weight:800;">जुड़े हुए लोग (रिकॉर्ड)</div>
+        </div>
+        <span id="rec-count-badge" style="background:#ffd600;color:#0f172a;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:800;">लोड हो रहा है...</span>
+      </header>
+      <div style="padding:10px 12px;background:#ffffff;border-bottom:1px solid #cbd5e1;flex-shrink:0;">
+        <input id="rec-search-input" type="text" placeholder="🔍 नाम या मोबाइल नंबर लिखकर खोजें..." style="width:100%;padding:10px 14px;border:1.5px solid #0057ff;border-radius:999px;font-size:14px;outline:none;" />
+      </div>
+      <main id="rec-users-list" style="flex:1;overflow-y:auto;padding:12px;">
+        <div style="text-align:center;color:#64748b;margin-top:40px;font-size:14px;">डेटाबेस से रिकॉर्ड निकाला जा रहा है...</div>
+      </main>
+    `;
+
+    document.body.appendChild(screen);
+    document.getElementById("rec-back-btn").onclick = () => screen.remove();
+
+    const allUsers = await cloudGetRegisteredUsers();
+    const listContainer = document.getElementById("rec-users-list");
+    const countBadge = document.getElementById("rec-count-badge");
+    const searchInput = document.getElementById("rec-search-input");
+
+    const showUserDossierModal = (u) => {
+      document.getElementById("ksjp-dossier-modal")?.remove();
+      const dModal = document.createElement("div");
+      dModal.id = "ksjp-dossier-modal";
+      dModal.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;padding:14px;z-index:10002;";
+
+      dModal.innerHTML = `
+        <div style="width:100%;max-width:400px;max-height:88dvh;overflow-y:auto;background:#ffffff;border-radius:18px;border:2px solid #0057ff;padding:16px;">
+          <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;">
+            <img src="${u.photo || ""}" onerror="this.style.display='none'" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2.5px solid #0057ff;background:#dbeafe;flex-shrink:0;" />
+            <div>
+              <div style="font-size:17px;font-weight:800;color:#0f172a;">${u.name}</div>
+              <div style="font-size:13px;font-weight:700;color:#0057ff;margin-top:2px;">📞 ${u.phone || "नंबर नहीं"}</div>
+              <div style="font-size:11.5px;color:#15803d;font-weight:700;margin-top:2px;">
+                ${u.email ? `✅ ${u.email}` : "वेरीफाइड सदस्य"}
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;font-size:13.5px;">
+            <div style="background:#f8fafc;padding:9px 11px;border-radius:10px;border:1px solid #e2e8f0;">
+              <div style="font-size:11px;font-weight:800;color:#64748b;">पूरा पता (Address):</div>
+              <div style="color:#0f172a;font-weight:600;margin-top:2px;">${u.address || "उपलब्ध नहीं"}</div>
+            </div>
+
+            <div style="background:#f8fafc;padding:9px 11px;border-radius:10px;border:1px solid #e2e8f0;">
+              <div style="font-size:11px;font-weight:800;color:#64748b;">जुड़ने का कारण:</div>
+              <div style="color:#0f172a;font-weight:600;margin-top:2px;">${u.reason || "उपलब्ध नहीं"}</div>
+            </div>
+
+            ${u.note ? `
+              <div style="background:#fefce8;padding:9px 11px;border-radius:10px;border:1px solid #fde047;">
+                <div style="font-size:11px;font-weight:800;color:#854d0e;">अतिरिक्त जानकारी / पर्ची:</div>
+                <div style="color:#0f172a;margin-top:3px;white-space:pre-wrap;line-height:1.4;">${u.note}</div>
+              </div>
+            ` : ""}
+
+            ${u.joinedAt ? `
+              <div style="font-size:11.5px;color:#64748b;text-align:right;">पंजीकरण समय: ${u.joinedAt}</div>
+            ` : ""}
+          </div>
+
+          <div style="margin-top:14px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:7px 10px;border-radius:10px;font-size:11px;font-weight:700;text-align:center;">
+            🔒 यह स्थायी सत्यापन दस्तावेज़ है (केवल देखने के लिए)
+          </div>
+
+          <button id="close-dossier-btn" style="width:100%;margin-top:12px;padding:10px;background:#0057ff;color:#ffffff;border:none;border-radius:999px;font-size:14px;font-weight:800;cursor:pointer;">बंद करें</button>
+        </div>
+      `;
+
+      document.body.appendChild(dModal);
+      document.getElementById("close-dossier-btn").onclick = () => dModal.remove();
+    };
+
+    const renderList = (query = "") => {
+      const q = query.trim().toLowerCase();
+      const filtered = allUsers.filter((u) =>
+        (u.name || "").toLowerCase().includes(q) ||
+        (u.phone || "").includes(q)
+      );
+
+      countBadge.textContent = `कुल: ${filtered.length}`;
+
+      if (filtered.length === 0) {
+        listContainer.innerHTML = `<div style="text-align:center;color:#64748b;margin-top:40px;font-size:14px;">कोई रिकॉर्ड नहीं मिला।</div>`;
+        return;
+      }
+
+      listContainer.innerHTML = filtered.map((u, idx) => `
+        <div class="citizen-row-card" data-idx="${idx}" style="background:#ffffff;border:1px solid #cbd5e1;border-radius:14px;padding:10px 12px;margin-bottom:9px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <div style="display:flex;align-items:center;gap:11px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:#0057ff;color:#fff;font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;border:2px solid #93c5fd;">
+              ${u.photo ? `<img src="${u.photo}" style="width:100%;height:100%;object-fit:cover;" />` : (u.name.charAt(0).toUpperCase())}
+            </div>
+            <div>
+              <div style="font-size:15px;font-weight:800;color:#0f172a;">${u.name}</div>
+              <div style="font-size:12.5px;font-weight:600;color:#475569;">📞 ${u.phone || "नंबर नहीं"}</div>
+            </div>
+          </div>
+          <span style="font-size:11.5px;font-weight:800;color:#0057ff;background:#eff6ff;padding:5px 10px;border-radius:999px;">विवरण देखें →</span>
+        </div>
+      `).join("");
+
+      listContainer.querySelectorAll(".citizen-row-card").forEach((el) => {
+        el.onclick = () => {
+          const item = filtered[Number(el.getAttribute("data-idx"))];
+          if (item) showUserDossierModal(item);
+        };
+      });
+    };
+
+    renderList("");
+    searchInput.oninput = (e) => renderList(e.target.value);
   };
 
   // लॉगिन, स्थायी सीट लॉक और प्रोफ़ाइल फ़ोटो मोडल
@@ -473,6 +661,7 @@ export async function showAdminPanel() {
   document.querySelectorAll(".panel-card").forEach((c) => {
     c.onclick = () => openRoom(c.getAttribute("data-action"), c.querySelector(".card-name").textContent);
   });
+  document.getElementById("btn-all-citizens").onclick = openCitizenRecordsViewer;
   document.getElementById("btn-notify").onclick = () => openRoom("notices", "🔔 पार्टी सूचना केंद्र");
   document.getElementById("btn-profile").onclick = openJoinOrProfile;
 

@@ -1,21 +1,34 @@
 // 06-voice-bridge/voice-system.js
-// 1. Site Manager को खुद को और किसी भी एडमिन को अनलॉक/हटाने की पावर (🔓 हटाएँ)
-// 2. जुड़ने से पहले सख्त मोबाइल नंबर सत्यापन (OTP Verification)
-// 3. घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम लाइव चैट + 1-to-1 लाइव ऑडियो कॉल
+// 1. असली Firebase Phone Authentication (Real SMS OTP) के ज़रिए नंबर सत्यापन
+// 2. Site Manager (मनीष कश्यप) को खुद को या किसी भी एडमिन को हटाने/अनलॉक करने की पावर
+// 3. घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम लाइव चैट
+
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 export async function initVoiceAndConferenceSystem() {
-  let projectId = "";
-  let apiKey = "";
+  let firebaseConfig = null;
   try {
     const keyUrl = new URL("../01-config/firebase-key.js", import.meta.url).href;
     const keyMod = await import(keyUrl);
-    projectId = keyMod?.firebaseConfig?.projectId || "";
-    apiKey = keyMod?.firebaseConfig?.apiKey || "";
+    firebaseConfig = keyMod?.firebaseConfig || null;
   } catch (e) {}
 
+  const projectId = firebaseConfig?.projectId || "";
+  const apiKey = firebaseConfig?.apiKey || "";
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
+
+  // Firebase Auth शुरू करना (असली SMS OTP के लिए)
+  let auth = null;
+  if (firebaseConfig) {
+    try {
+      const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      auth.languageCode = "hi";
+    } catch (e) {}
+  }
 
   const getMe = () => {
     try {
@@ -70,7 +83,7 @@ export async function initVoiceAndConferenceSystem() {
         if (seatId === "site-manager") {
           localStorage.removeItem("KSJP_CURRENT_SEAT_USER");
         }
-        alert(`✅ "${nameText}" को हटा दिया गया है! अब OTP सत्यापन से सही नंबर के साथ जुड़ सकते हैं।`);
+        alert(`✅ "${nameText}" को हटा दिया गया है! अब असली SMS OTP के साथ जुड़ सकते हैं।`);
         location.reload();
       };
 
@@ -79,15 +92,15 @@ export async function initVoiceAndConferenceSystem() {
   };
 
   // =========================================================================
-  // भाग 2: सख्त मोबाइल नंबर सत्यापन (OTP Verification)
+  // भाग 2: असली Firebase SMS OTP सत्यापन (Real Phone Verification)
   // =========================================================================
-  let expectedOtp = "";
+  let confirmationResult = null;
   let verifiedPhoneNumber = "";
 
-  const enforcePhoneOtpVerification = () => {
+  const enforceRealFirebaseOtp = () => {
     const phoneInput = document.querySelector('input[type="tel"], input[placeholder*="मोबाइल"], input[placeholder*="नंबर"]');
-    if (!phoneInput || phoneInput.dataset.otpGuarded === "1") return;
-    phoneInput.dataset.otpGuarded = "1";
+    if (!phoneInput || phoneInput.dataset.realOtpGuarded === "1") return;
+    phoneInput.dataset.realOtpGuarded = "1";
 
     const parentForm = phoneInput.closest("form") || phoneInput.parentElement;
     if (!parentForm) return;
@@ -96,70 +109,105 @@ export async function initVoiceAndConferenceSystem() {
     otpBox.style.cssText = "margin: 8px 0; padding: 10px; background: #fff7ed; border: 1.5px solid #ff6b00; border-radius: 12px;";
     otpBox.innerHTML = `
       <div style="font-size: 11.5px; font-weight: 800; color: #c2410c; margin-bottom: 6px;">
-        🔐 मोबाइल नंबर सत्यापन अनिवार्य (बिना OTP सत्यापन सीट लॉक नहीं होगी)
+        📲 असली मोबाइल SMS सत्यापन अनिवार्य (बिना SMS OTP सीट लॉक नहीं होगी)
       </div>
-      <div style="display: flex; gap: 6px; margin-bottom: 6px;">
-        <button type="button" id="ksjp-send-otp-btn" style="flex:1; padding: 8px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
-          📲 OTP भेजें
+      <div id="ksjp-recaptcha-container"></div>
+      <button type="button" id="ksjp-real-send-otp" style="width:100%; padding: 8px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer; margin-bottom: 6px;">
+        📩 मोबाइल पर असली OTP भेजें
+      </button>
+      <div id="ksjp-real-otp-row" style="display: none; gap: 6px;">
+        <input type="number" id="ksjp-real-otp-code" placeholder="SMS में आया 6 अंकों का OTP लिखें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
+        <button type="button" id="ksjp-real-verify-otp" style="padding: 7px 12px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
+          पुष्टि करें
         </button>
       </div>
-      <div id="ksjp-otp-verify-row" style="display: none; gap: 6px;">
-        <input type="number" id="ksjp-otp-code-inp" placeholder="6 अंकों का कोड लिखें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
-        <button type="button" id="ksjp-confirm-otp-btn" style="padding: 7px 12px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
-          सत्यापित करें
-        </button>
-      </div>
-      <div id="ksjp-otp-status" style="font-size: 11.5px; font-weight: 700; margin-top: 5px; color: #475569;"></div>
+      <div id="ksjp-real-otp-msg" style="font-size: 11.5px; font-weight: 700; margin-top: 5px; color: #475569;"></div>
     `;
     phoneInput.insertAdjacentElement("afterend", otpBox);
 
-    const sendBtn = document.getElementById("ksjp-send-otp-btn");
-    const verifyRow = document.getElementById("ksjp-otp-verify-row");
-    const codeInp = document.getElementById("ksjp-otp-code-inp");
-    const confirmBtn = document.getElementById("ksjp-confirm-otp-btn");
-    const statusText = document.getElementById("ksjp-otp-status");
+    const sendBtn = document.getElementById("ksjp-real-send-otp");
+    const otpRow = document.getElementById("ksjp-real-otp-row");
+    const codeInp = document.getElementById("ksjp-real-otp-code");
+    const verifyBtn = document.getElementById("ksjp-real-verify-otp");
+    const msgEl = document.getElementById("ksjp-real-otp-msg");
 
-    sendBtn.onclick = () => {
+    sendBtn.onclick = async () => {
       const raw = phoneInput.value.replace(/\D/g, "");
       if (!/^[6-9]\d{9}$/.test(raw) || /^(\d)\1{9}$/.test(raw)) {
-        statusText.style.color = "#dc2626";
-        statusText.textContent = "❌ अमान्य नंबर! कृपया 6, 7, 8 या 9 से शुरू होने वाला असली 10 अंकों का नंबर लिखें।";
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = "❌ कृपया 10 अंकों का सही भारतीय मोबाइल नंबर दर्ज करें।";
         return;
       }
-      expectedOtp = String(Math.floor(100000 + Math.random() * 900000));
-      verifiedPhoneNumber = "";
-      verifyRow.style.display = "flex";
-      statusText.style.color = "#0369a1";
-      statusText.textContent = `📩 सत्यापन कोड: [ ${expectedOtp} ] — पुष्टि के लिए नीचे दर्ज करें।`;
+      if (!auth) {
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = "⚠️ Firebase Auth लोड नहीं हो पाया। इंटरनेट जाँचें।";
+        return;
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = "SMS भेजा जा रहा है...";
+      msgEl.style.color = "#0369a1";
+      msgEl.textContent = "कृपया प्रतीक्षा करें, आपके नंबर पर SMS भेजा जा रहा है...";
+
+      try {
+        if (!window.ksjpRecaptchaVerifier) {
+          window.ksjpRecaptchaVerifier = new RecaptchaVerifier(auth, "ksjp-recaptcha-container", {
+            size: "invisible"
+          });
+        }
+        const fullPhone = `+91${raw}`;
+        confirmationResult = await signInWithPhoneNumber(auth, fullPhone, window.ksjpRecaptchaVerifier);
+        otpRow.style.display = "flex";
+        sendBtn.textContent = "🔄 दोबारा OTP भेजें";
+        sendBtn.disabled = false;
+        msgEl.style.color = "#16a34a";
+        msgEl.textContent = `✅ +91 ${raw} पर असली SMS OTP भेज दिया गया है! मैसेज देखकर कोड दर्ज करें।`;
+      } catch (err) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "📩 मोबाइल पर असली OTP भेजें";
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = `❌ SMS नहीं जा सका: ${err?.message || "कृपया Firebase में manishmanwala.github.io डोमेन जोड़ें।"}`;
+      }
     };
 
-    confirmBtn.onclick = () => {
-      const raw = phoneInput.value.replace(/\D/g, "");
-      if (codeInp.value.trim() === expectedOtp && expectedOtp !== "") {
+    verifyBtn.onclick = async () => {
+      const code = codeInp.value.trim();
+      if (!confirmationResult || code.length < 6) {
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = "❌ कृपया SMS में आया 6 अंकों का OTP दर्ज करें।";
+        return;
+      }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = "जाँच हो रही है...";
+      try {
+        await confirmationResult.confirm(code);
+        const raw = phoneInput.value.replace(/\D/g, "");
         verifiedPhoneNumber = raw;
         phoneInput.readOnly = true;
         phoneInput.style.background = "#f0fdf4";
-        verifyRow.style.display = "none";
+        otpRow.style.display = "none";
         sendBtn.style.display = "none";
-        statusText.style.color = "#16a34a";
-        statusText.textContent = `✅ नंबर (${raw}) सत्यापित हो गया है! अब आप पद लॉक कर सकते हैं।`;
-      } else {
-        statusText.style.color = "#dc2626";
-        statusText.textContent = "❌ गलत OTP कोड! कृपया सही 6 अंकों का कोड डालें।";
+        msgEl.style.color = "#16a34a";
+        msgEl.textContent = `✅ मोबाइल नंबर (+91 ${raw}) असली SMS द्वारा प्रमाणित हो गया है! अब आप पद लॉक कर सकते हैं।`;
+      } catch (err) {
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = "पुष्टि करें";
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = "❌ गलत OTP कोड! कृपया अपने SMS इनबॉक्स में आया सही कोड डालें।";
       }
     };
 
     parentForm.querySelectorAll("button").forEach((btn) => {
       if (btn.id && btn.id.startsWith("ksjp-")) return;
-      if (btn.dataset.otpSubmitLock === "1") return;
-      btn.dataset.otpSubmitLock = "1";
+      if (btn.dataset.realSubmitLock === "1") return;
+      btn.dataset.realSubmitLock = "1";
 
       btn.addEventListener("click", (ev) => {
         const currentRaw = phoneInput.value.replace(/\D/g, "");
         if (!verifiedPhoneNumber || verifiedPhoneNumber !== currentRaw) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
-          alert("⚠️ सुरक्षा नियम: पहले '📲 OTP भेजें' दबाकर अपना मोबाइल नंबर सत्यापित करें, तभी पद लॉक होगा!");
+          alert("⚠️ सुरक्षा नियम: पहले '📩 मोबाइल पर असली OTP भेजें' दबाकर SMS से अपना नंबर प्रमाणित करें!");
         }
       }, true);
     });
@@ -304,12 +352,12 @@ export async function initVoiceAndConferenceSystem() {
   setInterval(() => {
     injectConferenceCard();
     attachSiteManagerResetPower();
-    enforcePhoneOtpVerification();
+    enforceRealFirebaseOtp();
     checkNewNotices();
   }, 1500);
 
   injectConferenceCard();
   attachSiteManagerResetPower();
-  enforcePhoneOtpVerification();
+  enforceRealFirebaseOtp();
   checkNewNotices();
 }

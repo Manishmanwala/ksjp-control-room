@@ -1,6 +1,5 @@
 // 06-kick-member/kick-member.js
 // एडमिन पैनल में सदस्यों और एडमिन सीटों को प्रबंधित करने (हटाने/रीसेट) का सुरक्षित मॉड्यूल
-// (अब स्क्रीन पर कोई एरर नहीं छुपाया जाएगा; सब कुछ सीधा सामने दिखेगा)
 
 export async function openMembersManager() {
   let projectId = "";
@@ -54,7 +53,6 @@ export async function openMembersManager() {
   }
 
   try {
-    // 1. सामान्य सदस्य लोड करना (बिना एरर छुपाए साफ़ दिखाना)
     const res = await fetch(`${firestoreBase}/ksjp_users?pageSize=200&key=${apiKey}`);
     if (!res.ok) {
       throw new Error(`Firestore Fetch Failed: HTTP ${res.status}`);
@@ -74,7 +72,6 @@ export async function openMembersManager() {
       };
     });
 
-    // 2. एडमिन सीटों (admin-1 से admin-5 और site-manager) को सूची में जोड़ना
     let adminSeatsList = [];
     for (let i = 1; i <= 5; i++) {
       const seatKey = `admin-${i}`;
@@ -96,7 +93,6 @@ export async function openMembersManager() {
       } catch (e) {}
     }
 
-    // Site Manager को जोड़ना (सुरक्षित पद)
     try {
       const smRes = await fetch(`${firestoreBase}/ksjp_members/site-manager?key=${apiKey}`);
       if (smRes.ok) {
@@ -174,7 +170,6 @@ export async function openMembersManager() {
       };
     });
   } catch (e) {
-    // अब कोई एरर छुपेगा नहीं, बल्कि साफ़ दिखेगा
     body.innerHTML = `
       <div style="background:#ffeeee;border:2px solid #dc2626;padding:14px;border-radius:12px;color:#dc2626;margin-top:20px;font-weight:700;font-size:13.5px;line-height:1.4;">
         ⚠️ स्क्रिप्ट निष्पादन या डेटा लोड करने में त्रुटि (Error) आई है:<br>
@@ -182,4 +177,9 @@ export async function openMembersManager() {
       </div>
     `;
   }
+}
+
+// ब्रिज जो panel-logic.js की डिमांड पूरी करता है
+export function initKickMemberTool() {
+  window.openMembersManager = openMembersManager;
 }

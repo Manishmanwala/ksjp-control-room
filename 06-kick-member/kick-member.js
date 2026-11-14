@@ -204,4 +204,3 @@ export function initKickMemberTool() {
   btn.addEventListener("click", () => openMembersManager());
   headerActions.insertBefore(btn, headerActions.firstChild);
 }
-}

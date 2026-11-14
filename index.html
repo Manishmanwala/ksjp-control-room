@@ -35,6 +35,7 @@
   <script type="module">
     import { runStartPage } from "./02-start-page/execution/start.js";
     import { showAdminPanel } from "./03-page-panel/execution/panel-logic.js";
+    import { initNewMembersApproval } from "./05-new-members/new-members.js";
 
     // अपलोड की गई Screenshot फ़ोटो को आइकॉन में लगाना
     (async () => {
@@ -54,8 +55,9 @@
       } catch (e) {}
     })();
 
-    runStartPage(() => {
-      showAdminPanel();
+    runStartPage(async () => {
+      await showAdminPanel();
+      initNewMembersApproval();
     });
   </script>
 </body>

@@ -1,8 +1,7 @@
 // 06-voice-bridge/voice-system.js
-// 1. 1-to-1 लाइव ऑडियो कॉल + बोर्ड रूम सामूहिक रिंग + कॉन्फ्रेंस रूम कार्ड
-// 2. घंटी (🔔) पर नया संदेश आने पर लाल निशान
-// 3. Site Manager (मनीष कश्यप) के लिए किसी भी एडमिन या खुद को अनलॉक/हटाने की पावर
-// 4. एडमिन जुड़ने से पहले सख्त मोबाइल नंबर सत्यापन (OTP Verification)
+// 1. Site Manager को खुद को और किसी भी एडमिन को अनलॉक/हटाने की पावर (🔓 हटाएँ)
+// 2. जुड़ने से पहले सख्त मोबाइल नंबर सत्यापन (OTP Verification)
+// 3. घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम लाइव चैट + 1-to-1 लाइव ऑडियो कॉल
 
 export async function initVoiceAndConferenceSystem() {
   let projectId = "";
@@ -27,11 +26,10 @@ export async function initVoiceAndConferenceSystem() {
   };
 
   // =========================================================================
-  // भाग 1: Site Manager के लिए किसी भी एडमिन (जैसे पिताजी) को हटाने/अनलॉक करने की पावर
+  // भाग 1: Site Manager को खुद को और किसी भी एडमिन को हटाने/अनलॉक करने की पावर
   // =========================================================================
   const attachSiteManagerResetPower = () => {
     const me = getMe();
-    // यह पावर केवल Site Manager को ही दिखेगी
     if (!me || me.seatId !== "site-manager" || !firestoreBase) return;
 
     document.querySelectorAll(".panel-card").forEach((card) => {
@@ -40,24 +38,20 @@ export async function initVoiceAndConferenceSystem() {
       const subText = card.querySelector(".card-sub")?.textContent || "";
       const nameText = card.querySelector(".card-name")?.textContent || "";
 
-      // केवल जुड़ी हुई सीटों (Site Manager या एडमिन 1 से 5) पर बटन लगाना
       if (!pill || !pill.textContent.includes("जुड़ा हुआ")) return;
       card.dataset.smResetBound = "1";
 
-      // सीट ID पहचानना
       let seatId = "";
       if (subText.includes("स्थायी सदस्य") || nameText === me.name) {
         seatId = "site-manager";
       } else {
         const idx = Array.from(document.querySelectorAll(".panel-card")).indexOf(card);
-        // पैनल में क्रम: 0=Site Manager, 1=बोर्ड रूम, 2=कॉन्फ्रेंस रूम, 3..7=एडमिन 1..5
         if (idx >= 3 && idx <= 7) seatId = `admin-${idx - 2}`;
       }
       if (!seatId) return;
 
       const unlockBtn = document.createElement("button");
       unlockBtn.textContent = "🔓 हटाएँ";
-      unlockBtn.title = "Site Manager पावर: इस पद को खाली/अनलॉक करें";
       unlockBtn.style.cssText = `
         margin-left: 6px; background: #fee2e2; color: #dc2626;
         border: 1.5px solid #ef4444; border-radius: 999px;
@@ -66,7 +60,7 @@ export async function initVoiceAndConferenceSystem() {
 
       unlockBtn.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(`⚠️ Site Manager पावर:\nक्या आप वाकई "${nameText}" (${seatId}) को इस पद से हटाकर सीट खाली करना चाहते हैं?`)) return;
+        if (!confirm(`⚠️ Site Manager पावर:\nक्या आप वाकई "${nameText}" (${seatId}) को हटाकर यह पद खाली करना चाहते हैं?`)) return;
 
         unlockBtn.textContent = "हट रहा है...";
         await fetch(`${firestoreBase}/ksjp_members/${seatId}?key=${apiKey}`, {
@@ -76,7 +70,7 @@ export async function initVoiceAndConferenceSystem() {
         if (seatId === "site-manager") {
           localStorage.removeItem("KSJP_CURRENT_SEAT_USER");
         }
-        alert(`✅ "${nameText}" को हटा दिया गया है! अब इस पद पर सही मोबाइल नंबर के साथ नई नियुक्ति की जा सकती है।`);
+        alert(`✅ "${nameText}" को हटा दिया गया है! अब OTP सत्यापन से सही नंबर के साथ जुड़ सकते हैं।`);
         location.reload();
       };
 
@@ -85,7 +79,7 @@ export async function initVoiceAndConferenceSystem() {
   };
 
   // =========================================================================
-  // भाग 2: सख्त मोबाइल नंबर सत्यापन (OTP Verification) — बिना सही नंबर के एंट्री नहीं
+  // भाग 2: सख्त मोबाइल नंबर सत्यापन (OTP Verification)
   // =========================================================================
   let expectedOtp = "";
   let verifiedPhoneNumber = "";
@@ -98,20 +92,19 @@ export async function initVoiceAndConferenceSystem() {
     const parentForm = phoneInput.closest("form") || phoneInput.parentElement;
     if (!parentForm) return;
 
-    // OTP बॉक्स और बटन तैयार करना
     const otpBox = document.createElement("div");
     otpBox.style.cssText = "margin: 8px 0; padding: 10px; background: #fff7ed; border: 1.5px solid #ff6b00; border-radius: 12px;";
     otpBox.innerHTML = `
       <div style="font-size: 11.5px; font-weight: 800; color: #c2410c; margin-bottom: 6px;">
-        🔐 मोबाइल नंबर सत्यापन अनिवार्य (गलत नंबर मान्य नहीं होगा)
+        🔐 मोबाइल नंबर सत्यापन अनिवार्य (बिना OTP सत्यापन सीट लॉक नहीं होगी)
       </div>
       <div style="display: flex; gap: 6px; margin-bottom: 6px;">
-        <button type="button" id="ksjp-send-otp-btn" style="flex:1; padding: 7px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
+        <button type="button" id="ksjp-send-otp-btn" style="flex:1; padding: 8px; background: #ff6b00; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
           📲 OTP भेजें
         </button>
       </div>
       <div id="ksjp-otp-verify-row" style="display: none; gap: 6px;">
-        <input type="number" id="ksjp-otp-code-inp" placeholder="6 अंकों का कोड दर्ज करें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
+        <input type="number" id="ksjp-otp-code-inp" placeholder="6 अंकों का कोड लिखें" style="flex:1; padding: 7px 10px; border: 1.5px solid #16a34a; border-radius: 8px; font-size: 13px;" />
         <button type="button" id="ksjp-confirm-otp-btn" style="padding: 7px 12px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer;">
           सत्यापित करें
         </button>
@@ -128,7 +121,6 @@ export async function initVoiceAndConferenceSystem() {
 
     sendBtn.onclick = () => {
       const raw = phoneInput.value.replace(/\D/g, "");
-      // भारतीय 10-अंकों के असली मोबाइल नंबर की जाँच (6, 7, 8, 9 से शुरू + एक ही अंक बार-बार न हो)
       if (!/^[6-9]\d{9}$/.test(raw) || /^(\d)\1{9}$/.test(raw)) {
         statusText.style.color = "#dc2626";
         statusText.textContent = "❌ अमान्य नंबर! कृपया 6, 7, 8 या 9 से शुरू होने वाला असली 10 अंकों का नंबर लिखें।";
@@ -138,7 +130,7 @@ export async function initVoiceAndConferenceSystem() {
       verifiedPhoneNumber = "";
       verifyRow.style.display = "flex";
       statusText.style.color = "#0369a1";
-      statusText.textContent = `📩 सत्यापन कोड भेजा गया है: [ ${expectedOtp} ] — पुष्टि के लिए नीचे दर्ज करें।`;
+      statusText.textContent = `📩 सत्यापन कोड: [ ${expectedOtp} ] — पुष्टि के लिए नीचे दर्ज करें।`;
     };
 
     confirmBtn.onclick = () => {
@@ -150,14 +142,13 @@ export async function initVoiceAndConferenceSystem() {
         verifyRow.style.display = "none";
         sendBtn.style.display = "none";
         statusText.style.color = "#16a34a";
-        statusText.textContent = `✅ मोबाइल नंबर (${raw}) सफलतापूर्वक सत्यापित हो गया है! अब आप सेव कर सकते हैं।`;
+        statusText.textContent = `✅ नंबर (${raw}) सत्यापित हो गया है! अब आप पद लॉक कर सकते हैं।`;
       } else {
         statusText.style.color = "#dc2626";
         statusText.textContent = "❌ गलत OTP कोड! कृपया सही 6 अंकों का कोड डालें।";
       }
     };
 
-    // सेव / लॉक करने वाले बटन को तब तक रोकना जब तक नंबर सत्यापित न हो जाए
     parentForm.querySelectorAll("button").forEach((btn) => {
       if (btn.id && btn.id.startsWith("ksjp-")) return;
       if (btn.dataset.otpSubmitLock === "1") return;
@@ -168,14 +159,14 @@ export async function initVoiceAndConferenceSystem() {
         if (!verifiedPhoneNumber || verifiedPhoneNumber !== currentRaw) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
-          alert("⚠️ सुरक्षा नियम: पहले ऊपर '📲 OTP भेजें' दबाकर अपना मोबाइल नंबर सत्यापित करें, उसके बाद ही पद लॉक होगा!");
+          alert("⚠️ सुरक्षा नियम: पहले '📲 OTP भेजें' दबाकर अपना मोबाइल नंबर सत्यापित करें, तभी पद लॉक होगा!");
         }
       }, true);
     });
   };
 
   // =========================================================================
-  // भाग 3: घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम कार्ड + 1-to-1 लाइव कॉल
+  // भाग 3: घंटी (🔔) पर लाल निशान + कॉन्फ्रेंस रूम लाइव चैट
   // =========================================================================
   let latestNoticeCount = 0;
   const setupNotificationBellDot = () => {

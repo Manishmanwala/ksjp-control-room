@@ -1,3 +1,14 @@
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
 export async function showAdminPanel() {
   const bootEl = document.getElementById("boot-screen");
   const panelEl = document.getElementById("panel-screen");
@@ -124,15 +135,19 @@ export async function showAdminPanel() {
   } catch (e) {}
 
   // =========================================================================
-  // 01-config/firebase-key.js से केवल आवश्यक चाबी (projectId, apiKey) एक्सेस करना
+  // 01-config/firebase-key.js से अलग रखी हुई गोदाम की चाबी सुरक्षित रूप से लाना
   // =========================================================================
   let projectId = "";
   let apiKey = "";
+  let firebaseAuth = null;
+
   try {
     const keyMod = await import("../../01-config/firebase-key.js");
     if (keyMod && keyMod.firebaseConfig) {
       projectId = keyMod.firebaseConfig.projectId || "";
       apiKey = keyMod.firebaseConfig.apiKey || "";
+      const app = getApps().length ? getApps()[0] : initializeApp(keyMod.firebaseConfig);
+      firebaseAuth = getAuth(app);
     }
   } catch (e) {}
 
@@ -140,10 +155,18 @@ export async function showAdminPanel() {
   const getLocalUser = () => { try { return JSON.parse(localStorage.getItem(USER_LOCAL_KEY)) || null; } catch (e) { return null; } };
   const setLocalUser = (u) => { try { localStorage.setItem(USER_LOCAL_KEY, JSON.stringify(u)); } catch (e) {} };
 
-  // क्लाउड Firestore पर सदस्य व मैसेज सुरक्षित/पढ़ने वाले फ़ंक्शन
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
+
+  // भारतीय मोबाइल नंबर सत्यापन (नकली नंबरों को रोकना)
+  function isValidIndianMobile(phone) {
+    if (!/^[6-9]\d{9}$/.test(phone)) return false;
+    if (/^(\d)\1{9}$/.test(phone)) return false; // जैसे 9999999999, 8888888888
+    const fakeList = ["1234567890", "9876543210", "6789012345", "7890123456", "8901234567"];
+    if (fakeList.includes(phone)) return false;
+    return true;
+  }
 
   async function cloudGetMembers() {
     if (!firestoreBase) return {};
@@ -159,6 +182,10 @@ export async function showAdminPanel() {
           seatId,
           name: f.name?.stringValue || "",
           phone: f.phone?.stringValue || "",
+          email: f.email?.stringValue || "",
+          address: f.address?.stringValue || "",
+          reason: f.reason?.stringValue || "",
+          note: f.note?.stringValue || "",
           photo: f.photo?.stringValue || "",
           locked: Boolean(f.locked?.booleanValue)
         };
@@ -167,7 +194,7 @@ export async function showAdminPanel() {
     } catch (e) { return {}; }
   }
 
-  // मुख्य वेबसाइट से जुड़े सभी पंजीकृत नागरिकों का रिकॉर्ड लाना (केवल देखने के लिए)
+  // मुख्य वेबसाइट व एडमिन पैनल से जुड़े सभी नागरिकों का रिकॉर्ड लाना (View-Only)
   async function cloudGetRegisteredUsers() {
     if (!firestoreBase) return [];
     const collectionsToTry = ["ksjp_users", "users", "registrations"];
@@ -198,7 +225,6 @@ export async function showAdminPanel() {
       } catch (e) {}
     }
 
-    // एडमिन पैनल के जुड़े हुए सदस्यों को भी सूची में शामिल करना
     const adminMap = await cloudGetMembers();
     Object.values(adminMap).forEach((m) => {
       if (m && m.locked && !mergedMap.has(m.phone)) {
@@ -206,11 +232,11 @@ export async function showAdminPanel() {
           id: m.seatId,
           name: `${m.name} (${m.seatId.toUpperCase()})`,
           phone: m.phone || "",
-          email: "एडमिन पैनल सदस्य",
+          email: m.email || "एडमिन पैनल सदस्य",
           emailVerified: true,
-          address: "KSJP नियंत्रण कक्ष",
-          reason: "पार्टी संचालन एवं प्रबंधन",
-          note: "",
+          address: m.address || "KSJP नियंत्रण कक्ष",
+          reason: m.reason || "पार्टी संचालन एवं प्रबंधन",
+          note: m.note || "",
           photo: m.photo || "",
           joinedAt: ""
         });
@@ -223,19 +249,44 @@ export async function showAdminPanel() {
   async function cloudSaveMember(rec) {
     if (!firestoreBase) return false;
     try {
-      const res = await fetch(`${firestoreBase}/ksjp_members/${rec.seatId}?key=${apiKey}`, {
+      const nowStr = new Date().toLocaleString("hi-IN");
+      const res1 = await fetch(`${firestoreBase}/ksjp_members/${rec.seatId}?key=${apiKey}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fields: {
             name: { stringValue: rec.name },
             phone: { stringValue: rec.phone },
+            email: { stringValue: rec.email || "" },
+            address: { stringValue: rec.address || "" },
+            reason: { stringValue: rec.reason || "" },
+            note: { stringValue: rec.note || "" },
             photo: { stringValue: rec.photo || "" },
             locked: { booleanValue: true }
           }
         })
       });
-      return res.ok;
+
+      // साथ ही स्थायी नागरिक/सदस्य दस्तावेज़ सूची (ksjp_users) में भी सुरक्षित करना
+      await fetch(`${firestoreBase}/ksjp_users/${rec.phone}?key=${apiKey}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: {
+            name: { stringValue: `${rec.name} (${rec.seatId.toUpperCase()})` },
+            phone: { stringValue: rec.phone },
+            email: { stringValue: rec.email || "" },
+            emailVerified: { booleanValue: true },
+            address: { stringValue: rec.address || "" },
+            reason: { stringValue: rec.reason || "" },
+            note: { stringValue: rec.note || "" },
+            photo: { stringValue: rec.photo || "" },
+            joinedAt: { stringValue: nowStr }
+          }
+        })
+      });
+
+      return res1.ok;
     } catch (e) { return false; }
   }
 
@@ -281,7 +332,7 @@ export async function showAdminPanel() {
     } catch (e) { return false; }
   }
 
-  // फ़ोटो को क्लाउड के अनुकूल हल्के आकार में कंप्रेस करना
+  // फ़ोटो को क्लाउड के अनुकूल हल्के आकार में कंप्रेस करना (140px / 75% quality)
   const compressPhoto = (fileInput) => new Promise((resolve) => {
     const file = fileInput?.files?.[0];
     if (!file) return resolve("");
@@ -470,7 +521,9 @@ export async function showAdminPanel() {
     searchInput.oninput = (e) => renderList(e.target.value);
   };
 
-  // लॉगिन, स्थायी सीट लॉक और प्रोफ़ाइल फ़ोटो मोडल
+  // =========================================================================
+  // 2-स्टेप वेरिफिकेशन (Google Sign-In / Email Verification + पूरा पंजीकरण फॉर्म)
+  // =========================================================================
   const openJoinOrProfile = async () => {
     cachedMembers = await cloudGetMembers();
     const me = getLocalUser();
@@ -478,18 +531,19 @@ export async function showAdminPanel() {
 
     const modal = document.createElement("div");
     modal.id = "ksjp-modal";
-    modal.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.75);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10000;";
+    modal.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.78);display:flex;align-items:center;justify-content:center;padding:14px;z-index:10000;";
 
     if (me) {
       const activeData = cachedMembers[me.seatId] || me;
       modal.innerHTML = `
-        <div style="width:100%;max-width:360px;background:#fff;border-radius:18px;border:2px solid #0057ff;padding:18px;">
+        <div style="width:100%;max-width:370px;background:#fff;border-radius:18px;border:2px solid #0057ff;padding:18px;">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
             <img src="${activeData.photo || ""}" style="width:54px;height:54px;border-radius:50%;object-fit:cover;background:#e2e8f0;border:2px solid #0057ff;" />
             <div>
               <div style="font-size:16px;font-weight:800;">${activeData.name}</div>
               <div style="font-size:12px;color:#0057ff;font-weight:700;">पद: ${activeData.seatId.toUpperCase()} 🔒</div>
               <div style="font-size:11.5px;color:#475569;">मोबाइल: ${activeData.phone}</div>
+              ${activeData.email ? `<div style="font-size:11px;color:#15803d;font-weight:700;">✅ ${activeData.email}</div>` : ""}
             </div>
           </div>
           <div style="background:#fef9c3;border:1px solid #eab308;color:#854d0e;padding:7px 10px;border-radius:10px;font-size:11.5px;font-weight:700;margin-bottom:12px;">
@@ -503,36 +557,9 @@ export async function showAdminPanel() {
           </div>
         </div>
       `;
-    } else {
-      const opts = [
-        { id: "site-manager", label: "Site Manager (मुख्य संचालक)" },
-        { id: "admin-1", label: "एडमिन 1" },
-        { id: "admin-2", label: "एडमिन 2" },
-        { id: "admin-3", label: "एडमिन 3" },
-        { id: "admin-4", label: "एडमिन 4" },
-        { id: "admin-5", label: "एडमिन 5" }
-      ].map((s) => `<option value="${s.id}" ${cachedMembers[s.id]?.locked ? "disabled" : ""}>${s.label} ${cachedMembers[s.id]?.locked ? "(पहले से लॉक)" : "(खाली)"}</option>`).join("");
 
-      modal.innerHTML = `
-        <div style="width:100%;max-width:360px;background:#fff;border-radius:18px;border:2px solid #0057ff;padding:18px;">
-          <h3 style="font-size:17px;font-weight:800;color:#0057ff;margin-bottom:4px;">KSJP एडमिन पंजीकरण</h3>
-          <p style="font-size:12px;color:#475569;margin-bottom:10px;">जुड़ने के बाद पद क्लाउड पर स्थायी रूप से लॉक हो जाएगा।</p>
-          <select id="j-seat" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;">${opts}</select>
-          <input id="j-name" type="text" placeholder="अपना पूरा नाम लिखें" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;" />
-          <input id="j-phone" type="tel" maxlength="10" placeholder="10 अंकों का मोबाइल नंबर" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;" />
-          <input id="j-photo" type="file" accept="image/*" style="width:100%;font-size:12px;margin-bottom:12px;" />
-          <div style="display:flex;gap:8px;">
-            <button id="sub-join" style="flex:1;padding:10px;background:#00c853;color:#fff;border:none;border-radius:999px;font-weight:800;">जुड़ें और लॉक करें</button>
-            <button id="close-mod" style="padding:10px 14px;background:#e2e8f0;border:none;border-radius:999px;font-weight:700;">बाद में</button>
-          </div>
-        </div>
-      `;
-    }
-
-    document.body.appendChild(modal);
-    document.getElementById("close-mod").onclick = () => modal.remove();
-
-    if (me) {
+      document.body.appendChild(modal);
+      document.getElementById("close-mod").onclick = () => modal.remove();
       document.getElementById("save-prof").onclick = async () => {
         const nm = document.getElementById("upd-name").value.trim();
         const ph = await compressPhoto(document.getElementById("upd-photo"));
@@ -544,28 +571,178 @@ export async function showAdminPanel() {
         modal.remove();
         await refreshUI();
       };
-    } else {
-      document.getElementById("sub-join").onclick = async () => {
-        const seatId = document.getElementById("j-seat").value;
-        const name = document.getElementById("j-name").value.trim();
-        const phone = document.getElementById("j-phone").value.replace(/\D/g, "");
-        const photo = await compressPhoto(document.getElementById("j-photo"));
-        if (name.length < 2) return alert("कृपया पूरा नाम लिखें।");
-        if (phone.length !== 10) return alert("10 अंकों का सही मोबाइल नंबर डालें।");
-
-        const latest = await cloudGetMembers();
-        if (latest[seatId]?.locked) {
-          alert("यह पद अभी किसी और सदस्य द्वारा लॉक कर दिया गया है!");
-          return;
-        }
-        const rec = { seatId, name, phone, photo, locked: true };
-        const saved = await cloudSaveMember(rec);
-        if (!saved) return alert("क्लाउड से जुड़ने में समस्या हुई, कृपया इंटरनेट जांचें।");
-        setLocalUser(rec);
-        modal.remove();
-        await refreshUI();
-      };
+      return;
     }
+
+    // स्टेप 1 और स्टेप 2 का इंटरफेस (नए एडमिन/मैनेजर पंजीकरण के लिए)
+    const opts = [
+      { id: "site-manager", label: "Site Manager (मुख्य संचालक)" },
+      { id: "admin-1", label: "एडमिन 1" },
+      { id: "admin-2", label: "एडमिन 2" },
+      { id: "admin-3", label: "एडमिन 3" },
+      { id: "admin-4", label: "एडमिन 4" },
+      { id: "admin-5", label: "एडमिन 5" }
+    ].map((s) => `<option value="${s.id}" ${cachedMembers[s.id]?.locked ? "disabled" : ""}>${s.label} ${cachedMembers[s.id]?.locked ? "(पहले से लॉक)" : "(खाली)"}</option>`).join("");
+
+    modal.innerHTML = `
+      <div style="width:100%;max-width:390px;max-height:92dvh;overflow-y:auto;background:#fff;border-radius:18px;border:2px solid #0057ff;padding:16px;">
+        <h3 style="font-size:17px;font-weight:800;color:#0057ff;margin-bottom:3px;">KSJP सत्यापित एडमिन पंजीकरण</h3>
+        <p style="font-size:12px;color:#475569;margin-bottom:10px;">चरण 1: पहले Google या Email लिंक से असली पहचान प्रमाणित करें।</p>
+
+        <!-- चरण 1: Google / Email Verification बॉक्स -->
+        <div id="auth-step-box" style="background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:12px;padding:12px;margin-bottom:10px;">
+          <button id="btn-google-verify" type="button" style="width:100%;padding:10px;background:#ffffff;color:#0f172a;border:1.5px solid #0057ff;border-radius:999px;font-weight:800;font-size:13.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+            <span>🔵</span> <span>Continue with Google (तुरंत वेरीफाई)</span>
+          </button>
+
+          <div style="text-align:center;font-size:11px;color:#64748b;margin:8px 0;font-weight:700;">— या Gmail / Email से वेरीफाई करें —</div>
+
+          <input id="auth-email-inp" type="email" placeholder="अपना असली Gmail / Email लिखें" style="width:100%;padding:8.5px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:6px;font-size:13.5px;" />
+          <input id="auth-pass-inp" type="password" placeholder="नया पासवर्ड बनाएं (8-10 अक्षर)" style="width:100%;padding:8.5px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;font-size:13.5px;" />
+          <div style="display:flex;gap:6px;">
+            <button id="btn-send-email-link" type="button" style="flex:1;padding:8.5px;background:#0057ff;color:#fff;border:none;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;">वेरिफिकेशन लिंक भेजें</button>
+            <button id="btn-check-email-verified" type="button" style="flex:1;padding:8.5px;background:#00c853;color:#fff;border:none;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;">लिंक क्लिक कर दिया ✓</button>
+          </div>
+          <div id="auth-status-msg" style="font-size:11.5px;color:#b45309;font-weight:700;margin-top:6px;"></div>
+        </div>
+
+        <!-- चरण 2: पूरा पंजीकरण फॉर्म (ईमेल वेरीफाई होने के बाद खुलेगा) -->
+        <div id="reg-form-box" style="display:none;flex-direction:column;gap:8px;">
+          <div id="verified-email-badge" style="background:#dcfce7;border:1px solid #22c55e;color:#15803d;padding:7px 10px;border-radius:10px;font-size:12px;font-weight:800;"></div>
+
+          <label style="font-size:11.5px;font-weight:800;color:#334155;">पद चुनें:</label>
+          <select id="j-seat" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;">${opts}</select>
+
+          <input id="j-name" type="text" placeholder="पूरा नाम लिखें (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;" />
+          <input id="j-phone" type="tel" maxlength="10" placeholder="10 अंकों का असली मोबाइल नंबर (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;" />
+          <textarea id="j-address" rows="2" placeholder="पूरा पता: ग्राम/मोहल्ला, पोस्ट, तहसील, जिला, राज्य (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
+          <textarea id="j-reason" rows="2" placeholder="मैं क्यों जुड़ना चाहता हूँ? कारण लिखें (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
+          <textarea id="j-note" rows="2" placeholder="अतिरिक्त जानकारी / पर्ची / बायोडाटा (वैकल्पिक - कोई सीमा नहीं)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
+
+          <div style="font-size:11.5px;font-weight:700;color:#334155;">अपनी स्पष्ट फ़ोटो चुनें (स्वतः कंप्रेस होगी):</div>
+          <input id="j-photo" type="file" accept="image/*" style="width:100%;font-size:12px;" />
+
+          <button id="sub-join" type="button" style="width:100%;padding:11px;background:#00c853;color:#fff;border:none;border-radius:999px;font-weight:800;font-size:14px;margin-top:4px;cursor:pointer;">पंजीकरण पूरा करें और लॉक करें 🔒</button>
+        </div>
+
+        <button id="close-mod" type="button" style="width:100%;margin-top:8px;padding:9px;background:#e2e8f0;border:none;border-radius:999px;font-weight:700;cursor:pointer;">बाद में</button>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+    document.getElementById("close-mod").onclick = () => modal.remove();
+
+    let verifiedEmail = "";
+    const statusMsg = document.getElementById("auth-status-msg");
+    const authBox = document.getElementById("auth-step-box");
+    const regBox = document.getElementById("reg-form-box");
+    const emailBadge = document.getElementById("verified-email-badge");
+
+    const unlockRegistrationForm = (email) => {
+      verifiedEmail = email;
+      authBox.style.display = "none";
+      regBox.style.display = "flex";
+      emailBadge.textContent = `✅ वेरीफाइड ईमेल: ${email} (लॉक)`;
+    };
+
+    // विकल्प A: Google Sign-In
+    document.getElementById("btn-google-verify").onclick = async () => {
+      if (!firebaseAuth) return alert("Firebase कुंजी लोड नहीं हुई है।");
+      statusMsg.textContent = "Google से जोड़ा जा रहा है...";
+      try {
+        const provider = new GoogleAuthProvider();
+        const result = await signInWithPopup(firebaseAuth, provider);
+        if (result.user && result.user.email) {
+          unlockRegistrationForm(result.user.email);
+        }
+      } catch (err) {
+        statusMsg.textContent = "Google साइन-इन पूरा नहीं हुआ: " + (err.message || "");
+      }
+    };
+
+    // विकल्प B1: Email पर वेरिफिकेशन लिंक भेजना
+    document.getElementById("btn-send-email-link").onclick = async () => {
+      if (!firebaseAuth) return alert("Firebase कुंजी लोड नहीं हुई है।");
+      const em = document.getElementById("auth-email-inp").value.trim();
+      const pw = document.getElementById("auth-pass-inp").value;
+      if (!em || !em.includes("@")) return alert("कृपया सही ईमेल पता लिखें।");
+      if (pw.length < 8 || pw.length > 10) return alert("कृपया 8 से 10 अक्षरों का पासवर्ड लिखें।");
+
+      statusMsg.textContent = "वेरिफिकेशन लिंक भेजा जा रहा है...";
+      try {
+        let userCred;
+        try {
+          userCred = await createUserWithEmailAndPassword(firebaseAuth, em, pw);
+        } catch (createErr) {
+          userCred = await signInWithEmailAndPassword(firebaseAuth, em, pw);
+        }
+        if (userCred.user.emailVerified) {
+          unlockRegistrationForm(userCred.user.email);
+        } else {
+          await sendEmailVerification(userCred.user);
+          statusMsg.textContent = "📩 आपके Gmail इनबॉक्स (या Spam फ़ोल्डर) में लिंक भेज दिया गया है। लिंक पर क्लिक करने के बाद हरे बटन 'लिंक क्लिक कर दिया ✓' को दबाएं।";
+        }
+      } catch (err) {
+        statusMsg.textContent = "त्रुटि: " + (err.message || "ईमेल भेजने में समस्या हुई।");
+      }
+    };
+
+    // विकल्प B2: ईमेल लिंक वेरिफिकेशन की जांच करना
+    document.getElementById("btn-check-email-verified").onclick = async () => {
+      if (!firebaseAuth || !firebaseAuth.currentUser) {
+        return alert("पहले ऊपर अपना ईमेल व पासवर्ड डालकर लिंक भेजें।");
+      }
+      statusMsg.textContent = "सत्यापन जांचा जा रहा है...";
+      await firebaseAuth.currentUser.reload();
+      if (firebaseAuth.currentUser.emailVerified) {
+        unlockRegistrationForm(firebaseAuth.currentUser.email);
+      } else {
+        statusMsg.textContent = "⚠️ अभी ईमेल वेरीफाई नहीं हुआ है। कृपया अपने Gmail में आए लिंक पर क्लिक करें और फिर यह बटन दबाएं।";
+      }
+    };
+
+    // चरण 2 सबमिट करना
+    document.getElementById("sub-join").onclick = async () => {
+      if (!verifiedEmail) return alert("पहले Google या Email से पहचान वेरीफाई करें।");
+      const seatId = document.getElementById("j-seat").value;
+      const name = document.getElementById("j-name").value.trim();
+      const phone = document.getElementById("j-phone").value.replace(/\D/g, "");
+      const address = document.getElementById("j-address").value.trim();
+      const reason = document.getElementById("j-reason").value.trim();
+      const note = document.getElementById("j-note").value.trim();
+      const photo = await compressPhoto(document.getElementById("j-photo"));
+
+      if (name.length < 2) return alert("कृपया अपना पूरा नाम लिखें।");
+      if (!isValidIndianMobile(phone)) return alert("कृपया 10 अंकों का असली भारतीय मोबाइल नंबर डालें (नकली नंबर मान्य नहीं हैं)।");
+      if (address.length < 5) return alert("कृपया अपना पूरा पता लिखें।");
+      if (reason.length < 3) return alert("कृपया जुड़ने का कारण लिखें।");
+
+      const latest = await cloudGetMembers();
+      if (latest[seatId]?.locked) {
+        alert("यह पद अभी किसी और सदस्य द्वारा लॉक कर दिया गया है!");
+        return;
+      }
+
+      const rec = {
+        seatId,
+        name,
+        phone,
+        email: verifiedEmail,
+        address,
+        reason,
+        note,
+        photo,
+        locked: true
+      };
+
+      const saved = await cloudSaveMember(rec);
+      if (!saved) return alert("क्लाउड से जुड़ने में समस्या हुई, कृपया इंटरनेट जांचें।");
+
+      try { await signOut(firebaseAuth); } catch (e) {}
+      setLocalUser(rec);
+      modal.remove();
+      await refreshUI();
+    };
   };
 
   // सख्त गोपनीयता नियम के साथ कक्ष खोलना (सभी सदस्यों के बीच 1-to-1 निजी चैट)

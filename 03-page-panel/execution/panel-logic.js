@@ -1,4 +1,3 @@
-
 // panel-logic.js
 // KSJP एडमिन पैनल का मुख्य नियंत्रक (सुधारा हुआ संस्करण)
 
@@ -28,6 +27,15 @@ const SEATS = [
   { id: "admin-5", label: "एडमिन 5" }
 ];
 const ALLOWED_SEAT_IDS = new Set(SEATS.map((s) => s.id));
+
+// साझा validation: seatId और roomId एक ही जगह से जाँचे जाते हैं
+const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+function isValidSeatId(id) {
+  return ALLOWED_SEAT_IDS.has(id);
+}
+function isValidRoomId(id) {
+  return ROOM_ID_PATTERN.test(String(id ?? ""));
+}
 
 function stopRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
@@ -407,6 +415,10 @@ export async function showAdminPanel() {
   // लौटाता है: "ok" | "taken" | "error"
   async function cloudSaveMember(rec, { isNew = false } = {}) {
     if (!firestoreBase || !firebaseAuth?.currentUser) return "error";
+    if (!isValidSeatId(rec?.seatId) || !/^[6-9]\d{9}$/.test(String(rec?.phone ?? ""))) {
+      console.error("सहेजने से पहले seatId/phone अमान्य मिला:", rec?.seatId, rec?.phone);
+      return "error";
+    }
     try {
       const nowStr = new Date().toLocaleString("hi-IN");
 
@@ -471,6 +483,10 @@ export async function showAdminPanel() {
   // ts के हिसाब से सबसे नए 100 संदेश (null = त्रुटि, [] = सच में कोई संदेश नहीं)
   async function cloudGetPosts(roomId) {
     if (!firestoreBase || !firebaseAuth?.currentUser) return null;
+    if (!isValidRoomId(roomId)) {
+      console.error("अमान्य roomId:", roomId);
+      return null;
+    }
     try {
       const res = await firestoreFetch(apiUrl(`/ksjp_rooms/${encodeURIComponent(roomId)}:runQuery`), {
         method: "POST",
@@ -510,6 +526,10 @@ export async function showAdminPanel() {
 
   async function cloudAddPost(roomId, postObj) {
     if (!firestoreBase || !firebaseAuth?.currentUser) return false;
+    if (!isValidRoomId(roomId)) {
+      console.error("अमान्य roomId:", roomId);
+      return false;
+    }
     if (!postObj?.text || postObj.text.length > 2000) {
       console.error("संदेश खाली है या 2000 अक्षरों से अधिक है।");
       return false;
@@ -1016,7 +1036,7 @@ export async function showAdminPanel() {
       }
 
       const seatId = seatSelect.value;
-      if (!ALLOWED_SEAT_IDS.has(seatId)) {
+      if (!isValidSeatId(seatId)) {
         return alert("चुना गया पद मान्य नहीं है।");
       }
 
@@ -1083,6 +1103,10 @@ export async function showAdminPanel() {
       return;
     }
     const activeRoomId = isDirectChat ? [me.seatId, roomId].sort().join("__") : roomId;
+    if (!isValidRoomId(activeRoomId)) {
+      console.error("अमान्य कक्ष पहचान:", activeRoomId);
+      return alert("यह कक्ष खोला नहीं जा सकता।");
+    }
 
     document.getElementById("ksjp-room")?.remove();
     const room = document.createElement("div");

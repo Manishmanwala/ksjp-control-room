@@ -1,3 +1,6 @@
+// panel-logic.js
+// KSJP एडमिन पैनल का मुख्य नियंत्रक और सुरक्षित लॉजिक मॉड्यूल
+
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth,
@@ -133,10 +136,12 @@ export async function showAdminPanel() {
         logoImg.src = foundLogo.download_url;
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error("लोगो लोड करने में त्रुटि:", e);
+  }
 
   // =========================================================================
-  // 01-config/firebase-key.js से अलग रखी हुई गोदाम की चाबी सुरक्षित रूप से लाना
+  // Firebase कॉन्फ़िगरेशन और प्रमाणीकरण सेटअप
   // =========================================================================
   let projectId = "";
   let apiKey = "";
@@ -150,45 +155,57 @@ export async function showAdminPanel() {
       const app = getApps().length ? getApps()[0] : initializeApp(keyMod.firebaseConfig);
       firebaseAuth = getAuth(app);
 
-      // बदलाव 1: इस browser में Firebase Auth session को याद रखे
+      // Firebase Auth session को सुरक्षित रूप से याद रखना
       await setPersistence(firebaseAuth, browserLocalPersistence);
     }
-  } catch (e) {}
-
-  const USER_LOCAL_KEY = "KSJP_CURRENT_SEAT_USER";
-  const getLocalUser = () => { try { return JSON.parse(localStorage.getItem(USER_LOCAL_KEY)) || null; } catch (e) { return null; } };
-  const setLocalUser = (u) => { try { localStorage.setItem(USER_LOCAL_KEY, JSON.stringify(u)); } catch (e) {} };
+  } catch (e) {
+    console.error("Firebase Auth शुरू करने में विफल:", e);
+  }
 
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
 
-  // बदलाव 2: Firestore calls में Auth token जोड़ने वाला helper
+  // Firestore calls में Firebase Auth Token (Bearer Token) भेजने वाला सुरक्षित हेल्पर
   async function firestoreFetch(url, options = {}) {
-    const headers = new Headers(options.headers || {});
     const currentUser = firebaseAuth?.currentUser;
-
-    if (currentUser) {
-      const idToken = await currentUser.getIdToken();
-      headers.set("Authorization", `Bearer ${idToken}`);
+    if (!currentUser) {
+      throw new Error("Firestore request के लिए Firebase login जरूरी है।");
     }
 
+    const token = await currentUser.getIdToken();
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+
     return fetch(url, { ...options, headers });
+  }
+
+  // वर्तमान लॉग-इन यूज़र की सीट Firebase Auth email के आधार पर ढूँढना (Local Storage मुक्त)
+  async function getAuthenticatedUserSeat(membersMap) {
+    const user = firebaseAuth?.currentUser;
+    if (!user || !user.email) return null;
+
+    const email = user.email.toLowerCase();
+    for (const [seatId, m] of Object.entries(membersMap)) {
+      if (m && m.email && m.email.toLowerCase() === email && m.locked) {
+        return { seatId, ...m };
+      }
+    }
+    return null;
   }
 
   // भारतीय मोबाइल नंबर सत्यापन (नकली नंबरों को रोकना)
   function isValidIndianMobile(phone) {
     if (!/^[6-9]\d{9}$/.test(phone)) return false;
-    if (/^(\d)\1{9}$/.test(phone)) return false; // जैसे 9999999999, 8888888888
+    if (/^(\d)\1{9}$/.test(phone)) return false; // जैसे 9999999999
     const fakeList = ["1234567890", "9876543210", "6789012345", "7890123456", "8901234567"];
     if (fakeList.includes(phone)) return false;
     return true;
   }
 
   async function cloudGetMembers() {
-    if (!firestoreBase) return {};
+    if (!firestoreBase || !firebaseAuth?.currentUser) return {};
     try {
-      // बदलाव 3: fetch की जगह firestoreFetch का इस्तेमाल
       const res = await firestoreFetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
       if (!res.ok) return {};
       const data = await res.json();
@@ -209,18 +226,20 @@ export async function showAdminPanel() {
         };
       });
       return out;
-    } catch (e) { return {}; }
+    } catch (e) {
+      console.error("डेटाबेस से सदस्य सूची लाने में त्रुटि:", e);
+      return {};
+    }
   }
 
   // मुख्य वेबसाइट व एडमिन पैनल से जुड़े सभी नागरिकों का रिकॉर्ड लाना (View-Only)
   async function cloudGetRegisteredUsers() {
-    if (!firestoreBase) return [];
+    if (!firestoreBase || !firebaseAuth?.currentUser) return [];
     const collectionsToTry = ["ksjp_users", "users", "registrations"];
     const mergedMap = new Map();
 
     for (const col of collectionsToTry) {
       try {
-        // बदलाव 4: fetch की जगह firestoreFetch का इस्तेमाल
         const res = await firestoreFetch(`${firestoreBase}/${col}?pageSize=300&key=${apiKey}`);
         if (!res.ok) continue;
         const data = await res.json();
@@ -241,7 +260,9 @@ export async function showAdminPanel() {
           };
           mergedMap.set(userObj.phone || userObj.email || docId, userObj);
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error(`संग्रह ${col} पढ़ने में विफल:`, e);
+      }
     }
 
     const adminMap = await cloudGetMembers();
@@ -266,10 +287,9 @@ export async function showAdminPanel() {
   }
 
   async function cloudSaveMember(rec) {
-    if (!firestoreBase) return false;
+    if (!firestoreBase || !firebaseAuth?.currentUser) return false;
     try {
       const nowStr = new Date().toLocaleString("hi-IN");
-      // बदलाव 5: fetch की जगह firestoreFetch का इस्तेमाल
       const res1 = await firestoreFetch(`${firestoreBase}/ksjp_members/${rec.seatId}?key=${apiKey}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -287,7 +307,6 @@ export async function showAdminPanel() {
         })
       });
 
-      // साथ ही स्थायी नागरिक/सदस्य दस्तावेज़ सूची (ksjp_users) में भी सुरक्षित करना (firestoreFetch के साथ)
       await firestoreFetch(`${firestoreBase}/ksjp_users/${rec.phone}?key=${apiKey}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -307,13 +326,15 @@ export async function showAdminPanel() {
       });
 
       return res1.ok;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error("सदस्य डेटा सहेजने में त्रुटि:", e);
+      return false;
+    }
   }
 
   async function cloudGetPosts(roomId) {
-    if (!firestoreBase) return [];
+    if (!firestoreBase || !firebaseAuth?.currentUser) return [];
     try {
-      // बदलाव 6: fetch की जगह firestoreFetch का इस्तेमाल
       const res = await firestoreFetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?pageSize=100&key=${apiKey}`);
       if (!res.ok) return [];
       const data = await res.json();
@@ -329,13 +350,15 @@ export async function showAdminPanel() {
         };
       });
       return list.sort((a, b) => a.ts - b.ts);
-    } catch (e) { return []; }
+    } catch (e) {
+      console.error("चैट संदेश लाने में त्रुटि:", e);
+      return [];
+    }
   }
 
   async function cloudAddPost(roomId, postObj) {
-    if (!firestoreBase) return false;
+    if (!firestoreBase || !firebaseAuth?.currentUser) return false;
     try {
-      // बदलाव 7: fetch की जगह firestoreFetch का इस्तेमाल
       const res = await firestoreFetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -351,7 +374,10 @@ export async function showAdminPanel() {
         })
       });
       return res.ok;
-    } catch (e) { return false; }
+    } catch (e) {
+      console.error("संदेश पोस्ट करने में त्रुटि:", e);
+      return false;
+    }
   }
 
   // फ़ोटो को क्लाउड के अनुकूल हल्के आकार में कंप्रेस करना (140px / 75% quality)
@@ -379,15 +405,14 @@ export async function showAdminPanel() {
   let cachedMembers = {};
   const refreshUI = async () => {
     cachedMembers = await cloudGetMembers();
-    const me = getLocalUser();
+    const me = await getAuthenticatedUserSeat(cachedMembers);
 
     const topP = document.getElementById("btn-profile");
     if (topP && me) {
-      const latestMe = cachedMembers[me.seatId] || me;
-      if (latestMe.photo) {
-        topP.innerHTML = `<img src="${latestMe.photo}" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
+      if (me.photo) {
+        topP.innerHTML = `<img src="${me.photo}" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
       } else {
-        topP.textContent = latestMe.name.charAt(0).toUpperCase();
+        topP.textContent = me.name.charAt(0).toUpperCase();
       }
     }
 
@@ -410,10 +435,11 @@ export async function showAdminPanel() {
   };
 
   // =========================================================================
-  // सभी जुड़े हुए नागरिकों की View-Only सूची, सर्च और पूरा रिकॉर्ड कार्ड (बिना Delete/Edit)
+  // सभी जुड़े हुए नागरिकों की View-Only सूची, सर्च और पूरा रिकॉर्ड कार्ड
   // =========================================================================
   const openCitizenRecordsViewer = async () => {
-    const me = getLocalUser();
+    cachedMembers = await cloudGetMembers();
+    const me = await getAuthenticatedUserSeat(cachedMembers);
     if (!me) {
       openJoinOrProfile();
       return;
@@ -544,11 +570,11 @@ export async function showAdminPanel() {
   };
 
   // =========================================================================
-  // 2-स्टेप वेरिफिकेशन (Google Sign-In / Email Verification + पूरा पंजीकरण फॉर्म)
+  // 2-स्टेप वेरिफिकेशन और प्रोफ़ाइल प्रबंधन
   // =========================================================================
   const openJoinOrProfile = async () => {
     cachedMembers = await cloudGetMembers();
-    const me = getLocalUser();
+    const me = await getAuthenticatedUserSeat(cachedMembers);
     document.getElementById("ksjp-modal")?.remove();
 
     const modal = document.createElement("div");
@@ -556,22 +582,21 @@ export async function showAdminPanel() {
     modal.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.78);display:flex;align-items:center;justify-content:center;padding:14px;z-index:10000;";
 
     if (me) {
-      const activeData = cachedMembers[me.seatId] || me;
       modal.innerHTML = `
         <div style="width:100%;max-width:370px;background:#fff;border-radius:18px;border:2px solid #0057ff;padding:18px;">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-            <img src="${activeData.photo || ""}" style="width:54px;height:54px;border-radius:50%;object-fit:cover;background:#e2e8f0;border:2px solid #0057ff;" />
+            <img src="${me.photo || ""}" style="width:54px;height:54px;border-radius:50%;object-fit:cover;background:#e2e8f0;border:2px solid #0057ff;" />
             <div>
-              <div style="font-size:16px;font-weight:800;">${activeData.name}</div>
-              <div style="font-size:12px;color:#0057ff;font-weight:700;">पद: ${activeData.seatId.toUpperCase()} 🔒</div>
-              <div style="font-size:11.5px;color:#475569;">मोबाइल: ${activeData.phone}</div>
-              ${activeData.email ? `<div style="font-size:11px;color:#15803d;font-weight:700;">✅ ${activeData.email}</div>` : ""}
+              <div style="font-size:16px;font-weight:800;">${me.name}</div>
+              <div style="font-size:12px;color:#0057ff;font-weight:700;">पद: ${me.seatId.toUpperCase()} 🔒</div>
+              <div style="font-size:11.5px;color:#475569;">मोबाइल: ${me.phone}</div>
+              ${me.email ? `<div style="font-size:11px;color:#15803d;font-weight:700;">✅ ${me.email}</div>` : ""}
             </div>
           </div>
           <div style="background:#fef9c3;border:1px solid #eab308;color:#854d0e;padding:7px 10px;border-radius:10px;font-size:11.5px;font-weight:700;margin-bottom:12px;">
-            🔒 आपकी सदस्यता क्लाउड पर स्थायी लॉक है। आप खुद से नहीं हट सकते।
+            🔒 आपकी सदस्यता क्लाउड पर स्थायी लॉक है।
           </div>
-          <input id="upd-name" type="text" value="${activeData.name}" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;font-size:14px;" />
+          <input id="upd-name" type="text" value="${me.name}" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;margin-bottom:8px;font-size:14px;" />
           <input id="upd-photo" type="file" accept="image/*" style="width:100%;font-size:12px;margin-bottom:12px;" />
           <div style="display:flex;gap:8px;">
             <button id="save-prof" style="flex:1;padding:10px;background:#0057ff;color:#fff;border:none;border-radius:999px;font-weight:700;">क्लाउड पर अपडेट करें</button>
@@ -585,18 +610,16 @@ export async function showAdminPanel() {
       document.getElementById("save-prof").onclick = async () => {
         const nm = document.getElementById("upd-name").value.trim();
         const ph = await compressPhoto(document.getElementById("upd-photo"));
-        const updated = { ...(cachedMembers[me.seatId] || me) };
+        const updated = { ...me };
         if (nm.length >= 2) updated.name = nm;
         if (ph) updated.photo = ph;
         await cloudSaveMember(updated);
-        setLocalUser(updated);
         modal.remove();
         await refreshUI();
       };
       return;
     }
 
-    // स्टेप 1 और स्टेप 2 का इंटरफेस (नए एडमिन/मैनेजर पंजीकरण के लिए)
     const opts = [
       { id: "site-manager", label: "Site Manager (मुख्य संचालक)" },
       { id: "admin-1", label: "एडमिन 1" },
@@ -611,7 +634,6 @@ export async function showAdminPanel() {
         <h3 style="font-size:17px;font-weight:800;color:#0057ff;margin-bottom:3px;">KSJP सत्यापित एडमिन पंजीकरण</h3>
         <p style="font-size:12px;color:#475569;margin-bottom:10px;">चरण 1: पहले Google या Email लिंक से असली पहचान प्रमाणित करें।</p>
 
-        <!-- चरण 1: Google / Email Verification बॉक्स -->
         <div id="auth-step-box" style="background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:12px;padding:12px;margin-bottom:10px;">
           <button id="btn-google-verify" type="button" style="width:100%;padding:10px;background:#ffffff;color:#0f172a;border:1.5px solid #0057ff;border-radius:999px;font-weight:800;font-size:13.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
             <span>🔵</span> <span>Continue with Google (तुरंत वेरीफाई)</span>
@@ -628,7 +650,6 @@ export async function showAdminPanel() {
           <div id="auth-status-msg" style="font-size:11.5px;color:#b45309;font-weight:700;margin-top:6px;"></div>
         </div>
 
-        <!-- चरण 2: पूरा पंजीकरण फॉर्म (ईमेल वेरीफाई होने के बाद खुलेगा) -->
         <div id="reg-form-box" style="display:none;flex-direction:column;gap:8px;">
           <div id="verified-email-badge" style="background:#dcfce7;border:1px solid #22c55e;color:#15803d;padding:7px 10px;border-radius:10px;font-size:12px;font-weight:800;"></div>
 
@@ -639,9 +660,9 @@ export async function showAdminPanel() {
           <input id="j-phone" type="tel" maxlength="10" placeholder="10 अंकों का असली मोबाइल नंबर (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;" />
           <textarea id="j-address" rows="2" placeholder="पूरा पता: ग्राम/मोहल्ला, पोस्ट, तहसील, जिला, राज्य (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
           <textarea id="j-reason" rows="2" placeholder="मैं क्यों जुड़ना चाहता हूँ? कारण लिखें (अनिवार्य)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
-          <textarea id="j-note" rows="2" placeholder="अतिरिक्त जानकारी / पर्ची / बायोडाटा (वैकल्पिक - कोई सीमा नहीं)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
+          <textarea id="j-note" rows="2" placeholder="अतिरिक्त जानकारी / पर्ची / बायोडाटा (वैकल्पिक)" style="width:100%;padding:9px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:13.5px;"></textarea>
 
-          <div style="font-size:11.5px;font-weight:700;color:#334155;">अपनी स्पष्ट फ़ोटो चुनें (स्वतः कंप्रेस होगी):</div>
+          <div style="font-size:11.5px;font-weight:700;color:#334155;">अपनी स्पष्ट फ़ोटो चुनें:</div>
           <input id="j-photo" type="file" accept="image/*" style="width:100%;font-size:12px;" />
 
           <button id="sub-join" type="button" style="width:100%;padding:11px;background:#00c853;color:#fff;border:none;border-radius:999px;font-weight:800;font-size:14px;margin-top:4px;cursor:pointer;">पंजीकरण पूरा करें और लॉक करें 🔒</button>
@@ -667,7 +688,6 @@ export async function showAdminPanel() {
       emailBadge.textContent = `✅ वेरीफाइड ईमेल: ${email} (लॉक)`;
     };
 
-    // विकल्प A: Google Sign-In
     document.getElementById("btn-google-verify").onclick = async () => {
       if (!firebaseAuth) return alert("Firebase कुंजी लोड नहीं हुई है।");
       statusMsg.textContent = "Google से जोड़ा जा रहा है...";
@@ -682,7 +702,6 @@ export async function showAdminPanel() {
       }
     };
 
-    // विकल्प B1: Email पर वेरिफिकेशन लिंक भेजना
     document.getElementById("btn-send-email-link").onclick = async () => {
       if (!firebaseAuth) return alert("Firebase कुंजी लोड नहीं हुई है।");
       const em = document.getElementById("auth-email-inp").value.trim();
@@ -702,14 +721,13 @@ export async function showAdminPanel() {
           unlockRegistrationForm(userCred.user.email);
         } else {
           await sendEmailVerification(userCred.user);
-          statusMsg.textContent = "📩 आपके Gmail इनबॉक्स (या Spam फ़ोल्डर) में लिंक भेज दिया गया है। लिंक पर क्लिक करने के बाद हरे बटन 'लिंक क्लिक कर दिया ✓' को दबाएं।";
+          statusMsg.textContent = "📩 आपके Gmail इनबॉक्स में लिंक भेज दिया गया है। लिंक पर क्लिक करने के बाद हरा बटन दबाएं।";
         }
       } catch (err) {
         statusMsg.textContent = "त्रुटि: " + (err.message || "ईमेल भेजने में समस्या हुई।");
       }
     };
 
-    // विकल्प B2: ईमेल लिंक वेरिफिकेशन की जांच करना
     document.getElementById("btn-check-email-verified").onclick = async () => {
       if (!firebaseAuth || !firebaseAuth.currentUser) {
         return alert("पहले ऊपर अपना ईमेल व पासवर्ड डालकर लिंक भेजें।");
@@ -717,15 +735,14 @@ export async function showAdminPanel() {
       statusMsg.textContent = "सत्यापन जांचा जा रहा है...";
       await firebaseAuth.currentUser.reload();
       if (firebaseAuth.currentUser.emailVerified) {
-        unlockRegistrationForm(firebaseAuth.currentUser.email);
+        unlockRegistrationForm(verifiedEmail || firebaseAuth.currentUser.email);
       } else {
-        statusMsg.textContent = "⚠️ अभी ईमेल वेरीफाई नहीं हुआ है। कृपया अपने Gmail में आए लिंक पर क्लिक करें और फिर यह बटन दबाएं।";
+        statusMsg.textContent = "⚠️ अभी ईमेल वेरीफाई नहीं हुआ है।";
       }
     };
 
-    // चरण 2 सबमिट करना
     document.getElementById("sub-join").onclick = async () => {
-      if (!verifiedEmail) return alert("पहले Google या Email से पहचान वेरीफाई करें।");
+      if (!verifiedEmail) return alert("पहले पहचान वेरीफाई करें।");
       const seatId = document.getElementById("j-seat").value;
       const name = document.getElementById("j-name").value.trim();
       const phone = document.getElementById("j-phone").value.replace(/\D/g, "");
@@ -735,7 +752,7 @@ export async function showAdminPanel() {
       const photo = await compressPhoto(document.getElementById("j-photo"));
 
       if (name.length < 2) return alert("कृपया अपना पूरा नाम लिखें।");
-      if (!isValidIndianMobile(phone)) return alert("कृपया 10 अंकों का असली भारतीय मोबाइल नंबर डालें (नकली नंबर मान्य नहीं हैं)।");
+      if (!isValidIndianMobile(phone)) return alert("कृपया 10 अंकों का असली भारतीय मोबाइल नंबर डालें।");
       if (address.length < 5) return alert("कृपया अपना पूरा पता लिखें।");
       if (reason.length < 3) return alert("कृपया जुड़ने का कारण लिखें।");
 
@@ -758,18 +775,16 @@ export async function showAdminPanel() {
       };
 
       const saved = await cloudSaveMember(rec);
-      if (!saved) return alert("क्लाउड से जुड़ने में समस्या हुई, कृपया इंटरनेट जांचें।");
+      if (!saved) return alert("क्लाउड से जुड़ने में समस्या हुई।");
 
-      // बदलाव 8: Registration के बाद signOut हटा दिया गया है ताकि session बना रहे
-      setLocalUser(rec);
       modal.remove();
       await refreshUI();
     };
   };
 
-  // सख्त गोपनीयता नियम के साथ कक्ष खोलना (सभी सदस्यों के बीच 1-to-1 निजी चैट)
   const openRoom = async (roomId, title) => {
-    const me = getLocalUser();
+    cachedMembers = await cloudGetMembers();
+    const me = await getAuthenticatedUserSeat(cachedMembers);
     if (!me) {
       openJoinOrProfile();
       return;
@@ -777,7 +792,7 @@ export async function showAdminPanel() {
 
     const isDirectChat = (roomId === "site-manager" || roomId.startsWith("admin-"));
     if (isDirectChat && me.seatId === roomId) {
-      alert("यह आपकी अपनी सीट है। निजी बातचीत करने के लिए किसी दूसरे सदस्य या Site Manager के कार्ड पर टच करें।");
+      alert("यह आपकी अपनी सीट है। निजी बातचीत करने के लिए किसी दूसरे सदस्य के कार्ड पर टच करें।");
       return;
     }
     const activeRoomId = isDirectChat ? [me.seatId, roomId].sort().join("__") : roomId;
@@ -790,7 +805,7 @@ export async function showAdminPanel() {
     const privacyNote = roomId === "board-room"
       ? "🌐 सामूहिक कक्ष: यहाँ सभी सक्रिय सदस्य संदेश देख और लिख सकेंगे।"
       : isDirectChat
-        ? `🔒 निजी 1-to-1 चैट: यह बातचीत केवल आपके और ${title} के बीच गोपनीय है (कोई तीसरा नहीं पढ़ सकता)।`
+        ? `🔒 निजी 1-to-1 चैट: यह बातचीत केवल आपके और ${title} के बीच गोपनीय है।`
         : "📢 आधिकारिक कक्ष";
 
     const loadMessages = async () => {
@@ -833,7 +848,6 @@ export async function showAdminPanel() {
 
     document.getElementById("back-btn").onclick = () => {
       clearInterval(poll);
-      room.roomEl?.remove();
       room.remove();
     };
 
@@ -856,7 +870,12 @@ export async function showAdminPanel() {
   await refreshUI();
   setInterval(refreshUI, 6000);
 
-  if (!getLocalUser()) setTimeout(openJoinOrProfile, 500);
+  // यदि यूज़र लॉग-इन नहीं है, तो तुरंत पंजीकरण/प्रोफ़ाइल विंडो खोलना
+  setTimeout(async () => {
+    const m = await cloudGetMembers();
+    const me = await getAuthenticatedUserSeat(m);
+    if (!me) openJoinOrProfile();
+  }, 500);
 
   document.querySelectorAll(".panel-card").forEach((c) => {
     c.onclick = () => openRoom(c.getAttribute("data-action"), c.querySelector(".card-name").textContent);
@@ -865,7 +884,6 @@ export async function showAdminPanel() {
   document.getElementById("btn-notify").onclick = () => openRoom("notices", "🔔 पार्टी सूचना केंद्र");
   document.getElementById("btn-profile").onclick = openJoinOrProfile;
 
-  // चौथे फ़ोल्डर (04-execution/actions.js) को सक्रिय करना (यदि मौजूद हो)
   try {
     const execModule = await import("../../04-execution/actions.js");
     if (execModule && execModule.initPanelActions) {
@@ -873,9 +891,6 @@ export async function showAdminPanel() {
     }
   } catch (e) {}
 
-  // =========================================================================
-  // सदस्य व एडमिन प्रबंधन (Kick/Reset Member Tool) को स्वतः सक्रिय करना
-  // =========================================================================
   try {
     const kickModule = await import("../../06-kick-member/kick-member.js");
     if (kickModule && kickModule.initKickMemberTool) {

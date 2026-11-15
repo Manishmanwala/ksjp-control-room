@@ -40,9 +40,53 @@ export async function initNewMembersApproval() {
     return fetch(url, { ...options, headers });
   }
 
-  const getLocalAdmin = () => {
-    try { return JSON.parse(localStorage.getItem("KSJP_CURRENT_SEAT_USER")) || null; } catch (e) { return null; }
-  };
+  async function getAuthenticatedAdmin() {
+    const user = firebaseAuth?.currentUser;
+
+    if (!user || !user.email || !user.emailVerified || !firestoreBase) {
+      return null;
+    }
+
+    try {
+      const res = await firestoreFetch(
+        `${firestoreBase}/ksjp_members?pageSize=100&key=${apiKey}`
+      );
+
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      const validAdminSeats = [
+        "site-manager",
+        "admin-1",
+        "admin-2",
+        "admin-3",
+        "admin-4",
+        "admin-5"
+      ];
+
+      const matchingDoc = (data.documents || []).find((doc) => {
+        const fields = doc.fields || {};
+        const seatId = doc.name.split("/").pop();
+        const savedEmail = fields.email?.stringValue || "";
+
+        return (
+          validAdminSeats.includes(seatId) &&
+          fields.locked?.booleanValue === true &&
+          savedEmail.toLowerCase() === user.email.toLowerCase()
+        );
+      });
+
+      if (!matchingDoc) return null;
+
+      return {
+        seatId: matchingDoc.name.split("/").pop(),
+        email: user.email
+      };
+    } catch (err) {
+      console.error("Firebase Admin पहचान जाँच विफल:", err);
+      return null;
+    }
+  }
 
   // एडमिन पैनल के हेडर में 'नए सदस्य' बटन और लाल बिंदी जोड़ना
   function mountNewMembersButton() {
@@ -97,11 +141,10 @@ export async function initNewMembersApproval() {
 
   // नए सदस्यों की सूची खोलना और स्वीकृति देना
   async function openRequestsDrawer() {
-    const adminUser = getLocalAdmin();
-    const validAdminSeats = ["site-manager", "admin-1", "admin-2", "admin-3", "admin-4", "admin-5"];
+    const adminUser = await getAuthenticatedAdmin();
 
-    if (!adminUser || !validAdminSeats.includes(adminUser.seatId)) {
-      alert("🔒 केवल पंजीकृत Site Manager या Admin ही नए सदस्यों को स्वीकृति दे सकते हैं।");
+    if (!adminUser) {
+      alert("🔒 अपने पंजीकृत और verified Firebase account से login करें।");
       return;
     }
 

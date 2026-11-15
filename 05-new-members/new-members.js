@@ -1,18 +1,44 @@
 // 05-new-members/new-members.js
 // एडमिन पैनल में 'नए सदस्य' बटन, लाल नोटिफिकेशन बिंदी और केवल एडमिन द्वारा स्वीकृति
 
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
 export async function initNewMembersApproval() {
   let projectId = "";
   let apiKey = "";
+  let firebaseAuth = null;
   try {
     const keyMod = await import("../01-config/firebase-key.js");
-    projectId = keyMod?.firebaseConfig?.projectId || "";
-    apiKey = keyMod?.firebaseConfig?.apiKey || "";
-  } catch (e) {}
+    const config = keyMod?.firebaseConfig;
+
+    projectId = config?.projectId || "";
+    apiKey = config?.apiKey || "";
+
+    if (config) {
+      const app = getApps().length ? getApps()[0] : initializeApp(config);
+      firebaseAuth = getAuth(app);
+    }
+  } catch (e) {
+    console.error("Firebase Auth शुरू नहीं हुआ:", e);
+  }
 
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
+
+  async function firestoreFetch(url, options = {}) {
+    const user = firebaseAuth?.currentUser;
+    if (!user) {
+      throw new Error("Firestore request के लिए Firebase login जरूरी है।");
+    }
+
+    const token = await user.getIdToken();
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+
+    return fetch(url, { ...options, headers });
+  }
 
   const getLocalAdmin = () => {
     try { return JSON.parse(localStorage.getItem("KSJP_CURRENT_SEAT_USER")) || null; } catch (e) { return null; }
@@ -42,7 +68,7 @@ export async function initNewMembersApproval() {
   async function fetchPendingRequests() {
     if (!firestoreBase) return;
     try {
-      const res = await fetch(`${firestoreBase}/ksjp_membership_requests?pageSize=200&key=${apiKey}`);
+      const res = await firestoreFetch(`${firestoreBase}/ksjp_membership_requests?pageSize=200&key=${apiKey}`);
       if (!res.ok) return;
       const data = await res.json();
       pendingList = (data.documents || []).map((doc) => {
@@ -138,7 +164,7 @@ export async function initNewMembersApproval() {
         btn.textContent = "स्वीकृति दी जा रही है...";
 
         // 1. ksjp_users में status को 'approved' और role को 'general_member' करना (एडमिन पद के अयोग्य)
-        await fetch(`${firestoreBase}/ksjp_users/${target.phone}?updateMask.fieldPaths=membershipStatus&updateMask.fieldPaths=approved&updateMask.fieldPaths=role&updateMask.fieldPaths=approvedBy&key=${apiKey}`, {
+        await firestoreFetch(`${firestoreBase}/ksjp_users/${target.phone}?updateMask.fieldPaths=membershipStatus&updateMask.fieldPaths=approved&updateMask.fieldPaths=role&updateMask.fieldPaths=approvedBy&key=${apiKey}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -152,7 +178,7 @@ export async function initNewMembersApproval() {
         });
 
         // 2. रिक्वेस्ट कतार में status को 'approved' करना ताकि लाल बिंदी हट जाए
-        await fetch(`${firestoreBase}/ksjp_membership_requests/${target.phone}?updateMask.fieldPaths=status&key=${apiKey}`, {
+        await firestoreFetch(`${firestoreBase}/ksjp_membership_requests/${target.phone}?updateMask.fieldPaths=status&key=${apiKey}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

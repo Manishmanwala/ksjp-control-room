@@ -255,6 +255,36 @@ export async function showAdminPanel() {
     console.error("लोगो लोड करने में त्रुटि:", e);
   }
 
+  // ---------- लाल सूचना पट्टी (त्रुटि होने पर यूज़र को ऊपर दिखती है) ----------
+  const notices = new Map();
+  const renderNotices = () => {
+    let bar = document.getElementById("ksjp-notice");
+    if (notices.size === 0) {
+      bar?.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "ksjp-notice";
+      bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:10050;background:#dc2626;color:#fff;padding:6px 12px;font-size:12px;font-weight:700;text-align:center;cursor:pointer;";
+      bar.onclick = () => {
+        notices.clear();
+        bar.remove();
+      };
+      document.body.appendChild(bar);
+    }
+    bar.textContent = [...notices.values()].join(" • ");
+  };
+  const showNotice = (key, msg) => {
+    notices.set(key, msg);
+    renderNotices();
+  };
+  const hideNotice = (key) => {
+    notices.delete(key);
+    renderNotices();
+  };
+  let usersLoadIncomplete = false;
+
   // ---------- Firebase शुरू करना ----------
   let projectId = "";
   let apiKey = "";
@@ -274,6 +304,9 @@ export async function showAdminPanel() {
     }
   } catch (e) {
     console.error("Firebase शुरू करने में विफल (firebase-key.js का पाथ/कॉन्फ़िग जाँचें):", e);
+  }
+  if (!firebaseAuth) {
+    showNotice("init", "सेवा शुरू नहीं हो सकी, डेटा लोड नहीं होगा।");
   }
 
   const docRoot = `projects/${projectId}/databases/(default)/documents`;
@@ -350,6 +383,7 @@ export async function showAdminPanel() {
     if (!firestoreBase || !firebaseAuth?.currentUser) return [];
     const collectionsToTry = ["ksjp_users", "users", "registrations"];
     const mergedMap = new Map();
+    usersLoadIncomplete = false;
 
     for (const col of collectionsToTry) {
       try {
@@ -360,6 +394,7 @@ export async function showAdminPanel() {
           const res = await firestoreFetch(apiUrl(`/${col}`, params));
           if (!res.ok) {
             console.warn(`संग्रह ${col} पढ़ा नहीं जा सका, status: ${res.status}`);
+            if (col === "ksjp_users") usersLoadIncomplete = true;
             break;
           }
           const data = await res.json();
@@ -385,6 +420,7 @@ export async function showAdminPanel() {
         }
       } catch (e) {
         console.error(`संग्रह ${col} पढ़ने में विफल:`, e);
+        if (col === "ksjp_users") usersLoadIncomplete = true;
       }
     }
 
@@ -600,7 +636,12 @@ export async function showAdminPanel() {
     refreshing = true;
     try {
       const members = await cloudGetMembers();
-      if (!members) return; // त्रुटि पर UI न छेड़ें
+      if (!members) {
+        // त्रुटि पर UI न छेड़ें, पर यूज़र को बता दें
+        showNotice("members", "डेटा लोड नहीं हो पा रहा। इंटरनेट जाँचें, थोड़ी देर में फिर कोशिश होगी।");
+        return;
+      }
+      hideNotice("members");
       cachedMembers = members;
       const me = await getAuthenticatedUserSeat(cachedMembers);
 
@@ -754,13 +795,16 @@ export async function showAdminPanel() {
       );
 
       countBadge.textContent = `कुल: ${filtered.length}`;
+      const warnHtml = usersLoadIncomplete
+        ? `<div style="background:#fee2e2;border:1px solid #dc2626;color:#991b1b;padding:8px 10px;border-radius:10px;font-size:12px;font-weight:700;margin-bottom:10px;">⚠️ सूची अधूरी हो सकती है। कुछ रिकॉर्ड लोड नहीं हो सके।</div>`
+        : "";
 
       if (filtered.length === 0) {
-        listContainer.innerHTML = `<div style="text-align:center;color:#64748b;margin-top:40px;font-size:14px;">कोई रिकॉर्ड नहीं मिला।</div>`;
+        listContainer.innerHTML = warnHtml + `<div style="text-align:center;color:#64748b;margin-top:40px;font-size:14px;">कोई रिकॉर्ड नहीं मिला।</div>`;
         return;
       }
 
-      listContainer.innerHTML = filtered.map((u, idx) => `
+      listContainer.innerHTML = warnHtml + filtered.map((u, idx) => `
         <div class="citizen-row-card" data-idx="${idx}" style="background:#ffffff;border:1px solid #cbd5e1;border-radius:14px;padding:10px 12px;margin-bottom:9px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
           <div style="display:flex;align-items:center;gap:11px;">
             <div style="width:44px;height:44px;border-radius:50%;background:#0057ff;color:#fff;font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;border:2px solid #93c5fd;">
@@ -1134,6 +1178,7 @@ export async function showAdminPanel() {
       try {
         const list = await cloudGetPosts(activeRoomId);
         if (list === null) {
+          showNotice("chat", "संदेश लोड नहीं हो पा रहे। कनेक्शन जाँचें।");
           // त्रुटि: पुरानी स्क्रीन जस की तस; पहली बार में ही संदेश दिखाएँ
           if (firstLoad) {
             box.innerHTML = `<div style="text-align:center;color:#b91c1c;margin-top:40px;font-size:13.5px;">संदेश लोड नहीं हो सके। कृपया इंटरनेट/अनुमतियाँ जांचें।</div>`;
@@ -1141,6 +1186,7 @@ export async function showAdminPanel() {
           return;
         }
 
+        hideNotice("chat");
         const signature = JSON.stringify(list);
         if (signature === lastSignature && !firstLoad) return;
         lastSignature = signature;
@@ -1190,6 +1236,7 @@ export async function showAdminPanel() {
 
     document.getElementById("back-btn").onclick = () => {
       stopRoomPoll();
+      hideNotice("chat");
       room.remove();
     };
 

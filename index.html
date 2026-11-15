@@ -29,43 +29,17 @@
     </div>
   </section>
 
-  <!-- चेकपॉइंट 3: मुख्य एडमिन पैनल -->
-  <section class="panel-screen" id="panel-screen" style="display:none;"></section>
+  <!-- चेकपॉइंट 3: मुख्य एडमिन पैनल (जहाँ रनिंग स्टेटस पैनल भी दिखेगा) -->
+  <section class="panel-screen" id="panel-screen" style="display:none;">
+    <div id="ksjp-running-status-panel"></div>
+  </section>
 
-  <script type="module">
-    import { runStartPage } from "./02-start-page/execution/start.js";
-    import { showAdminPanel } from "./03-page-panel/execution/panel-logic.js";
-
-    // अपलोड की गई फ़ोटो को आइकॉन में लगाना
-    (async () => {
-      try {
-        const res = await fetch("https://api.github.com/repos/Manishmanwala/ksjp-control-room/contents/");
-        if (res.ok) {
-          const files = await res.json();
-          const foundLogo = files.find((f) =>
-            f.type === "file" &&
-            (f.name.startsWith("Screenshot_") || /\.(jpg|jpeg|png|webp)$/i.test(f.name))
-          );
-          if (foundLogo && foundLogo.download_url) {
-            document.getElementById("site-favicon").href = foundLogo.download_url;
-            document.getElementById("apple-touch-icon").href = foundLogo.download_url;
-          }
-        }
-      } catch (e) {}
-    })();
-
-    runStartPage(async () => {
-      await showAdminPanel();
-
-      // आवश्यक प्लग-इन मॉड्यूल सुरक्षित तरीके से लोड करना (डबल किक-मेंबर हटा दिया गया है)
-      import("./06-voice-bridge/voice-system.js")
-        .then((m) => m.initVoiceAndConferenceSystem?.())
-        .catch(() => {});
-
-      import("./05-new-members/new-members.js")
-        .then((m) => m.initNewMembersApproval?.())
-        .catch(() => {});
-    });
-  </script>
+  <!-- 
+    नक्शा बिल्कुल साफ: 
+    index.html अब किसी भी अंदरूनी मॉड्यूल को नहीं जानती। 
+    यह सीधे रूट फोल्डर में बैठे 'auto-loader.js' से बात करती है, 
+    और ऑटो-लोडर बाकी सबको क्रमानुसार संभाल लेता है।
+  -->
+  <script type="module" src="./auto-loader.js"></script>
 </body>
 </html>

@@ -6,7 +6,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
-  signOut
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 export async function showAdminPanel() {
@@ -148,6 +149,9 @@ export async function showAdminPanel() {
       apiKey = keyMod.firebaseConfig.apiKey || "";
       const app = getApps().length ? getApps()[0] : initializeApp(keyMod.firebaseConfig);
       firebaseAuth = getAuth(app);
+
+      // बदलाव 1: इस browser में Firebase Auth session को याद रखे
+      await setPersistence(firebaseAuth, browserLocalPersistence);
     }
   } catch (e) {}
 
@@ -158,6 +162,19 @@ export async function showAdminPanel() {
   const firestoreBase = projectId
     ? `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
     : "";
+
+  // बदलाव 2: Firestore calls में Auth token जोड़ने वाला helper
+  async function firestoreFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const currentUser = firebaseAuth?.currentUser;
+
+    if (currentUser) {
+      const idToken = await currentUser.getIdToken();
+      headers.set("Authorization", `Bearer ${idToken}`);
+    }
+
+    return fetch(url, { ...options, headers });
+  }
 
   // भारतीय मोबाइल नंबर सत्यापन (नकली नंबरों को रोकना)
   function isValidIndianMobile(phone) {
@@ -171,7 +188,8 @@ export async function showAdminPanel() {
   async function cloudGetMembers() {
     if (!firestoreBase) return {};
     try {
-      const res = await fetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
+      // बदलाव 3: fetch की जगह firestoreFetch का इस्तेमाल
+      const res = await firestoreFetch(`${firestoreBase}/ksjp_members?key=${apiKey}`);
       if (!res.ok) return {};
       const data = await res.json();
       const out = {};
@@ -202,7 +220,8 @@ export async function showAdminPanel() {
 
     for (const col of collectionsToTry) {
       try {
-        const res = await fetch(`${firestoreBase}/${col}?pageSize=300&key=${apiKey}`);
+        // बदलाव 4: fetch की जगह firestoreFetch का इस्तेमाल
+        const res = await firestoreFetch(`${firestoreBase}/${col}?pageSize=300&key=${apiKey}`);
         if (!res.ok) continue;
         const data = await res.json();
         (data.documents || []).forEach((doc) => {
@@ -250,7 +269,8 @@ export async function showAdminPanel() {
     if (!firestoreBase) return false;
     try {
       const nowStr = new Date().toLocaleString("hi-IN");
-      const res1 = await fetch(`${firestoreBase}/ksjp_members/${rec.seatId}?key=${apiKey}`, {
+      // बदलाव 5: fetch की जगह firestoreFetch का इस्तेमाल
+      const res1 = await firestoreFetch(`${firestoreBase}/ksjp_members/${rec.seatId}?key=${apiKey}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -267,8 +287,8 @@ export async function showAdminPanel() {
         })
       });
 
-      // साथ ही स्थायी नागरिक/सदस्य दस्तावेज़ सूची (ksjp_users) में भी सुरक्षित करना
-      await fetch(`${firestoreBase}/ksjp_users/${rec.phone}?key=${apiKey}`, {
+      // साथ ही स्थायी नागरिक/सदस्य दस्तावेज़ सूची (ksjp_users) में भी सुरक्षित करना (firestoreFetch के साथ)
+      await firestoreFetch(`${firestoreBase}/ksjp_users/${rec.phone}?key=${apiKey}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -293,7 +313,8 @@ export async function showAdminPanel() {
   async function cloudGetPosts(roomId) {
     if (!firestoreBase) return [];
     try {
-      const res = await fetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?pageSize=100&key=${apiKey}`);
+      // बदलाव 6: fetch की जगह firestoreFetch का इस्तेमाल
+      const res = await firestoreFetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?pageSize=100&key=${apiKey}`);
       if (!res.ok) return [];
       const data = await res.json();
       const list = (data.documents || []).map((doc) => {
@@ -314,7 +335,8 @@ export async function showAdminPanel() {
   async function cloudAddPost(roomId, postObj) {
     if (!firestoreBase) return false;
     try {
-      const res = await fetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?key=${apiKey}`, {
+      // बदलाव 7: fetch की जगह firestoreFetch का इस्तेमाल
+      const res = await firestoreFetch(`${firestoreBase}/ksjp_rooms/${roomId}/messages?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -738,7 +760,7 @@ export async function showAdminPanel() {
       const saved = await cloudSaveMember(rec);
       if (!saved) return alert("क्लाउड से जुड़ने में समस्या हुई, कृपया इंटरनेट जांचें।");
 
-      try { await signOut(firebaseAuth); } catch (e) {}
+      // बदलाव 8: Registration के बाद signOut हटा दिया गया है ताकि session बना रहे
       setLocalUser(rec);
       modal.remove();
       await refreshUI();

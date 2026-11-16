@@ -50,7 +50,28 @@ async function runAutoLoader() {
   }
 
   // डैशबोर्ड UI अपडेट करें
+  updateDiagnosticDashboardUI()
+window.openKsjpDiagnostics = () => {
+  const box = document.getElementById("ksjp-running-status-panel");
+  if (!box) return;
+
   updateDiagnosticDashboardUI();
+  box.style.display = "block";
+
+  // पुराना close button दोबारा न जोड़ें
+  box.querySelector("#close-ksjp-diagnostics")?.remove();
+
+  const close = document.createElement("button");
+  close.id = "close-ksjp-diagnostics";
+  close.type = "button";
+  close.textContent = "✖ रिपोर्ट बंद करें";
+  close.style.cssText = "display:block;margin:0 0 8px auto;padding:6px 10px;cursor:pointer;";
+  close.onclick = () => {
+    box.style.display = "none";
+  };
+
+  box.prepend(close);
+};
   
   // लोडिंग पूरी होने के बाद ऐप/पैनल को बूट करें
   startAdminApp();

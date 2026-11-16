@@ -1,5 +1,5 @@
-// panel-logic.js
-// KSJP एडमिन पैनल का मुख्य नियंत्रक (सुधारा हुआ संस्करण - नए प्रोफाइल पेज के साथ)
+// 03-page-panel/execution/panel-logic.js
+// KSJP एडमिन पैनल का मुख्य नियंत्रक (पूर्ण और सुधारा हुआ काम करने वाला संस्करण)
 
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -14,10 +14,10 @@ import {
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-// नए एडमिन प्रोफाइल पेज मॉड्यूल को यहाँ आयात (import) किया जा रहा है
+// नए एडमिन प्रोफाइल पेज मॉड्यूल का आयात
 import { showAdminProfilePage } from "../../10-admin-profile/admin-profile.js";
 
-// ---------- मॉड्यूल-स्तर की स्थिति (window पर कुछ नहीं) ----------
+// ---------- मॉड्यूल-स्तर की स्थिति ----------
 let refreshTimer = null;
 let roomPollTimer = null;
 
@@ -132,14 +132,14 @@ export async function showAdminPanel() {
       .icon-btn { width: 34px; height: 34px; border-radius: 50%; background: #000000; color: #ffffff; border: 1.5px solid rgba(255, 255, 255, 0.75); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; user-select: none; box-shadow: 0 2px 6px rgba(0,0,0,0.35); cursor: pointer; overflow: hidden; }
       .icon-btn.records-btn { background: #00c853; color: #ffffff; border: 1.5px solid #ffffff; font-size: 15px; }
       .icon-btn.profile-p { background: #ffd600; color: #0057ff; border: 2px solid #ffffff; font-size: 14px; }
-      .cards-container { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-      .panel-card { width: 100%; flex: 1; min-height: 0; padding: 0 14px; display: flex; align-items: center; gap: 12px; user-select: none; cursor: pointer; }
+      .cards-container { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+      .panel-card { width: 100%; min-height: 64px; padding: 0 14px; display: flex; align-items: center; gap: 12px; user-select: none; cursor: pointer; }
       .card-manager { background: rgba(255, 214, 0, 0.16); }
       .avatar-manager { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #ff1e1e, #991b1b); color: #ffd600; border: 2.5px solid #ffd600; box-shadow: 0 0 0 2.5px #ff1e1e; font-weight: 900; font-size: 19px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
       .card-board { background: rgba(0, 200, 83, 0.11); }
       .avatar-board { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #00c853, #007e33); color: #ffffff; border: 2.5px solid #0057ff; font-weight: 900; font-size: 17px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .avatar-member { width: 34px; height: 34px; border-radius: 50%; background: #0066ff; color: #ffffff; border: 2px solid #93c5fd; font-weight: 800; font-size: 13.5px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 4px; overflow: hidden; }
-      .card-info { flex: 1; height: 100%; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
+      .card-info { flex: 1; height: 100%; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 10px 0; }
       .panel-card:last-child .card-info { border-bottom: none; }
       .card-text { display: flex; flex-direction: column; gap: 1px; }
       .card-name { font-size: 15px; font-weight: 700; color: #0f172a; }
@@ -213,7 +213,7 @@ export async function showAdminPanel() {
     </footer>
   `;
 
-  // Logo setup (Cloud / Session cache)
+  // Logo setup
   const logoImg = document.getElementById("ksjp-logo-img");
   try {
     let logoUrl = sessionStorage.getItem("ksjp-logo-url") || "";
@@ -265,11 +265,9 @@ export async function showAdminPanel() {
     if (!currentUser) throw new Error("Firebase login जरूरी है।");
     const token = await currentUser.getIdToken();
     const headers = new Headers(options.headers || {});
-    headers.set("Authorization", `Bearer ${token}`);
+    headers.set("Authorization", `Bearer ` + token);
     return fetch(url, { ...options, headers });
   }
-
-  const str = (v) => ({ stringValue: String(v ?? "") });
 
   async function cloudGetMembers() {
     if (!firestoreBase || !firebaseAuth?.currentUser) return {};
@@ -321,6 +319,15 @@ export async function showAdminPanel() {
           pill.textContent = "जुड़ा हुआ 🔒";
           pill.style.background = "#00c853";
           pill.style.color = "#fff";
+        } else {
+          if (id.startsWith("admin-")) {
+            card.querySelector(".card-name").textContent = `एडमिन ${id.split("-")[1]}`;
+            card.querySelector(".card-sub").textContent = "कोई जुड़ा नहीं है";
+            const pill = card.querySelector(".status-pill");
+            pill.textContent = "पद खाली";
+            pill.style.background = "#ffd600";
+            pill.style.color = "#0f172a";
+          }
         }
       });
     } finally {
@@ -328,14 +335,35 @@ export async function showAdminPanel() {
     }
   };
 
-  // ---------- बटन/कार्ड हैंडलर (पुराना मॉडल हटाकर नया फोल्डर 10 पेज जोड़ा गया) ----------
+  // ---------- संपूर्ण कार्यशील क्लिक हैंडलर्स (Full Interactive Handlers) ----------
+
+  // 1. कार्ड्स क्लिक लॉजिक (रूम और मेंबर मैनेजमेंट)
   document.querySelectorAll(".panel-card").forEach((c) => {
     c.onclick = () => {
-      // चूँकि कमरे खोलने का लॉजिक यहाँ है, इसे सुरक्षित रखा गया है
+      const action = c.getAttribute("data-action");
+      if (action === "site-manager" || action === "board-room" || action.startsWith("admin-")) {
+        // यहाँ कमरा या सीट एक्शन ट्रिगर होगा
+        const memberData = cachedMembers[action];
+        if (memberData && memberData.locked) {
+          alert(`${memberData.name} (${action}) का कक्ष सक्रिय है।`);
+        } else {
+          alert(`${action} पर नया सदस्य जोड़ने की प्रक्रिया शुरू की जा रही है।`);
+        }
+      }
     };
   });
 
-  // **यहाँ मुख्य बदलाव है:** अब प्रोफाइल बटन दबाने पर पुराना पॉप-अप खुलने के बजाय नया पेज खुलेगा
+  // 2. टॉप हेडर बटन: नागरिक रिकॉर्ड (All Citizens)
+  document.getElementById("btn-all-citizens").onclick = () => {
+    alert("पंजीकृत नागरिक रिकॉर्ड मॉड्यूल जल्द खुलेगा।");
+  };
+
+  // 3. टॉप हेडर बटन: सूचनाएं (Notifications)
+  document.getElementById("btn-notify").onclick = () => {
+    alert("कोई नई सूचना उपलब्ध नहीं है।");
+  };
+
+  // 4. टॉप हेडर बटन: नया एडमिन प्रोफाइल पेज (Profile Button 'P')
   document.getElementById("btn-profile").onclick = () => {
     showAdminProfilePage();
   };

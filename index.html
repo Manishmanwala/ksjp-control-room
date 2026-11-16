@@ -29,17 +29,17 @@
     </div>
   </section>
 
-  <!-- चेकपॉइंट 3: मुख्य एडमिन पैनल (जहाँ रनिंग स्टेटस पैनल भी दिखेगा) -->
-  <section class="panel-screen" id="panel-screen" style="display:none;">
-    <div id="ksjp-running-status-panel"></div>
-  </section>
+  <!-- चेकपॉइंट 3: मुख्य एडमिन पैनल -->
+  <section class="panel-screen" id="panel-screen" style="display:none;"></section>
 
   <!-- 
-    नक्शा बिल्कुल साफ: 
-    index.html अब किसी भी अंदरूनी मॉड्यूल को नहीं जानती। 
-    यह सीधे रूट फोल्डर में बैठे 'auto-loader.js' से बात करती है, 
-    और ऑटो-लोडर बाकी सबको क्रमानुसार संभाल लेता है।
+    💡 मास्टर सुधार: 
+    डायग्नोस्टिक स्टेटस पैनल को #panel-screen के बाहर (Sibling बना कर) रखा गया है, 
+    ताकि panel-logic.js जब भी अंदर का HTML बदले, यह स्टेटस पैनल कभी डिलीट न हो!
   -->
+  <div id="ksjp-running-status-panel" style="position: fixed; bottom: 10px; right: 10px; z-index: 9999; max-width: 350px; font-size: 12px;"></div>
+
+  <!-- मुख्य रूट फोल्डर से ऑटो-लोडर को जोड़ना -->
   <script type="module" src="./auto-loader.js"></script>
 </body>
 </html>

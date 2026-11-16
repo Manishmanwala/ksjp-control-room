@@ -10,7 +10,8 @@ const MODULE_LIST = [
   { id: "06-kick-member", path: "./06-kick-member/kick-member.js", name: "Kick Member" },
   { id: "07-security", path: "./07-security/e2e-shield.js", name: "E2E Security Shield" },
   { id: "08-voice-bridge", path: "./08-voice-bridge/voice-system.js", name: "Voice Bridge" },
-  { id: "09-reset-tool", path: "./09-reset-tool/reset-master.js", name: "Reset Master Tool" }
+  { id: "09-reset-tool", path: "./09-reset-tool/reset-master.js", name: "Reset Master Tool" },
+  { id: "10-admin-profile", path: "./10-admin-profile/admin-profile.js", name: "Admin Profile" },
 ];
 
 // डायग्नोस्टिक स्टेटस रिकॉर्ड
